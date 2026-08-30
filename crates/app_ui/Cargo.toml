@@ -48,6 +48,9 @@ features = [
     "ImageData",
     "KeyboardEvent",
     "MouseEvent",
+    "Touch",
+    "TouchEvent",
+    "TouchList",
     "Window",
     "WheelEvent",
 ]

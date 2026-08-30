@@ -37,13 +37,44 @@ backend, no upload, no account. Close the tab and nothing is left anywhere.
   `WindowWidth`/`WindowCenter`.
 - **Hounsfield-correct pixels** — `RescaleSlope`/`RescaleIntercept` are applied,
   so the CT presets mean what they say.
-- **Navigation** — mouse wheel or arrow keys to scroll the stack, a scrub bar,
-  ctrl+wheel or +/− to zoom, middle-drag (or the *Pan* tool) to pan.
+- **All image, no chrome** — every control lives in one narrow left rail that
+  folds away with `S`, giving the scan the entire viewport. The text over the
+  image hides too, with `O`.
+- **Keyboard first** — everything is reachable without the mouse, using only
+  keys a laptop actually has (see below). `?` brings up the cheat sheet.
+- **Trackpad native** — two-finger scroll steps through the stack with the
+  deltas accumulated, so one swipe moves a few images rather than thirty;
+  pinch zooms smoothly. Touch screens get swipe and pinch too.
 - **Incremental loading** — a 1000-image study streams in with a live counter
   instead of freezing the tab; pixel data is decoded only for the slice you
   are actually looking at.
 - **Graceful about what it cannot decode** — an unsupported transfer syntax
   produces a per-series warning, not a crash.
+
+## Keyboard
+
+Bindings assume a laptop: no numpad, and nothing that needs `Fn`. `Home`,
+`End`, `PageUp` and `PageDown` work as well, but never as the only way to do
+something.
+
+| Keys | Action |
+| --- | --- |
+| `↑` `↓` | Previous / next image |
+| `Shift+↑` `Shift+↓` | Jump 10 images |
+| `g` `G` | First / last image |
+| `←` `→` or `[` `]` | Previous / next series |
+| `1` `2` `3` `4` | Soft tissue · Lung · Bone · Brain |
+| `=` `-` | Zoom in / out |
+| `0` or `f` | Fit to window |
+| `p` | Pan mode — left-drag pans instead of setting window/level |
+| `s` or `Tab` | Show / hide the panel |
+| `o` | Show / hide the text over the image |
+| `?` or `h` | Shortcut list |
+| `Esc` | Close the shortcut list |
+
+Mouse: wheel steps images, ctrl+wheel zooms, left-drag sets window/level,
+middle-drag pans, double-click fits. Files can be dropped anywhere on the
+window.
 
 ## Build
 
@@ -141,9 +172,14 @@ XelRay работает иначе: перетащите папку в окно 
 
 Что умеет: распознаёт серии, правильно сортирует срезы, применяет
 `RescaleSlope`/`RescaleIntercept` (то есть шкалу Хаунсфилда), даёт пресеты окна
-(мягкие ткани, лёгкие, кости, мозг) и настройку окна мышью, прокрутку колесом,
-масштабирование и перемещение. Большие исследования на 500–1000 срезов
-загружаются постепенно, со счётчиком.
+(мягкие ткани, лёгкие, кости, мозг) и настройку окна мышью, прокрутку колесом
+и двумя пальцами по тачпаду, масштабирование и перемещение. Большие
+исследования на 500–1000 срезов загружаются постепенно, со счётчиком.
+
+Всё управление доступно с клавиатуры: `↑`/`↓` — срезы, `Shift+↑`/`↓` — по
+десять, `g`/`G` — первый и последний, `←`/`→` — серии, `1`–`4` — пресеты окна,
+`=`/`-` — масштаб, `0` — вписать в окно, `s` — убрать панель (снимок займёт
+весь экран), `o` — убрать подписи, `?` — список горячих клавиш.
 
 Открыть: <https://xelth.com/M/xelray/>
 
