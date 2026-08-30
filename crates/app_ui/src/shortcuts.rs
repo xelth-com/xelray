@@ -24,8 +24,7 @@ pub const HELP: &[(&str, &str, &str)] = &[
     ("", "[ ]", "The same, either hand"),
     ("Window", "1 2 3 4", "Soft tissue · Lung · Bone · Brain"),
     ("View", "= -", "Zoom in / out"),
-    ("", "0 f", "Fit to window"),
-    ("", "p", "Pan mode — left-drag pans"),
+    ("", "0 f", "Fit to window, undo zoom"),
     ("Layout", "s Tab", "Show / hide the panel"),
     ("", "o", "Show / hide text over the image"),
     ("", "? h", "This list"),
@@ -95,7 +94,6 @@ pub fn install(v: Viewer) {
             "=" | "+" => v.zoom_by(1.25),
             "-" | "_" => v.zoom_by(1.0 / 1.25),
             "0" | "f" => v.reset_view(),
-            "p" => v.pan_mode.update(|p| *p = !*p),
 
             // ---- layout -------------------------------------------------
             "s" | "Tab" => v.rail.update(|r| *r = !*r),

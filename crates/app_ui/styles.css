@@ -291,8 +291,44 @@ a:hover { text-decoration: underline; }
     -webkit-user-select: none;
     touch-action: none;
 }
-.stage.panning { cursor: grab; }
-.stage.panning:active { cursor: grabbing; }
+/* Zoomed in, a drag moves the image — so say so with the cursor. */
+.stage.zoomed { cursor: grab; }
+.stage.zoomed:active { cursor: grabbing; }
+
+.stage-message {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    max-width: min(420px, 80%);
+    padding: 16px 20px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(20, 24, 29, 0.94);
+    text-align: center;
+    pointer-events: none;
+}
+.stage-message.error { border-color: rgba(255, 180, 84, 0.45); }
+.sm-title { color: var(--warn); font-weight: 600; margin-bottom: 6px; }
+.sm-body {
+    color: var(--muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    margin-top: 3px;
+}
+
+.stage-busy {
+    position: absolute;
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(20, 24, 29, 0.8);
+    color: var(--muted);
+    font-size: 11.5px;
+    pointer-events: none;
+}
 
 .stage canvas {
     /* Fitted to the pane by CSS, so a window resize needs no JavaScript;

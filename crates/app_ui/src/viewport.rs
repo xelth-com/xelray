@@ -5,13 +5,20 @@
 //! recomputed when the slice or the window changes. The canvas is fitted to
 //! the pane by `max-width`/`max-height`, so it follows a window resize with
 //! no JavaScript at all.
+//!
+//! There is no pan *mode*. At fitted size there is nothing to pan, so a drag
+//! sets brightness; once zoomed in, dragging moves the image, which is what
+//! dragging a too-large picture does everywhere else, and `Shift` gets
+//! brightness back. Middle-drag always moves.
 
-use leptos::html::Canvas;
+use leptos::html::{Canvas, Div};
 use leptos::*;
+use wasm_bindgen::prelude::*;
+use web_sys::{AddEventListenerOptions, Event};
 
 use crate::Viewer;
 
-/// What the current left/middle-button drag is doing.
+/// What the current drag is doing.
 #[derive(Clone, Copy, PartialEq)]
 enum Drag {
     /// Horizontal adjusts window width, vertical adjusts window level.
@@ -36,8 +43,35 @@ const PIXELS_PER_SLICE: f64 = 24.0;
 /// ctrl+wheel. Continuous rather than stepped, so pinch feels analogue.
 const PIXELS_PER_ZOOM_DOUBLING: f64 = 260.0;
 
-/// Trackpad swipe distance worth one slice, for one-finger touch.
+/// Swipe distance worth one slice, for one-finger touch.
 const TOUCH_PIXELS_PER_SLICE: f64 = 18.0;
+
+/// Attach a listener that is allowed to call `preventDefault`.
+///
+/// Leptos delegates `on:` handlers to the document, and Chrome forces
+/// document-level `wheel` and `touch*` listeners passive — which silently
+/// drops our `preventDefault` and fills the console with intervention
+/// warnings. Binding straight to the element with `passive: false` is the
+/// only way to own these gestures.
+fn listen_active<E>(el: &web_sys::EventTarget, name: &str, mut handler: impl FnMut(E) + 'static)
+where
+    E: JsCast,
+{
+    let closure = Closure::wrap(Box::new(move |ev: Event| {
+        handler(ev.unchecked_into::<E>());
+    }) as Box<dyn FnMut(Event)>);
+
+    let options = AddEventListenerOptions::new();
+    options.set_passive(false);
+    let _ = el.add_event_listener_with_callback_and_add_event_listener_options(
+        name,
+        closure.as_ref().unchecked_ref(),
+        &options,
+    );
+    // The stage lives for as long as the study is open and the listener must
+    // outlive this call; leaking one closure per gesture is the price.
+    closure.forget();
+}
 
 /// Normalise a wheel delta to CSS pixels.
 ///
@@ -52,15 +86,17 @@ fn wheel_pixels(ev: &ev::WheelEvent) -> f64 {
 
 #[component]
 pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
+    let stage_ref = create_node_ref::<Div>();
+
     // `(kind, last_x, last_y)` — deltas are taken against the previous move
     // so the gesture keeps working when the pointer leaves the element.
     let drag = create_rw_signal::<Option<(Drag, f64, f64)>>(None);
     // Leftover scroll distance that has not yet added up to a whole slice.
     let scroll_acc = store_value(0.0f64);
-    // One-finger touch: last Y, and accumulated swipe.
-    let touch = store_value::<Option<(f64, f64)>>(None);
-    // Two-finger touch: the pinch distance at the last touchmove.
-    let pinch = store_value::<Option<f64>>(None);
+    // One-finger touch: last position, accumulated swipe.
+    let touch = store_value::<Option<(f64, f64, f64)>>(None);
+    // Two-finger touch: pinch distance and centroid Y at the last move.
+    let pinch = store_value::<Option<(f64, f64, f64)>>(None);
 
     let _ = window_event_listener(ev::mousemove, move |ev| {
         let Some((kind, last_x, last_y)) = drag.get_untracked() else {
@@ -87,8 +123,11 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
 
     let on_mousedown = move |ev: ev::MouseEvent| {
         let kind = match ev.button() {
+            // The middle button is the universal "grab and move".
             1 => Drag::Pan,
-            0 if v.pan_mode.get_untracked() => Drag::Pan,
+            // Zoomed in, dragging moves the image the way dragging any
+            // oversized picture does; Shift asks for brightness instead.
+            0 if v.is_zoomed() && !ev.shift_key() => Drag::Pan,
             0 => Drag::Window,
             _ => return,
         };
@@ -129,22 +168,22 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
     };
 
     // ---- touch ------------------------------------------------------------
-    // Deliberately minimal: one finger swipes through the stack, two fingers
-    // pinch to zoom. `touch-action: none` in the CSS is what makes both
-    // reach us instead of scrolling the page.
+    // One finger swipes through the stack, or moves the image once it is
+    // zoomed in — the same rule as the mouse. Two fingers pinch to zoom and
+    // scroll to step, both at once.
 
     let on_touchstart = move |ev: ev::TouchEvent| {
         let touches = ev.touches();
         match touches.length() {
             1 => {
                 if let Some(t) = touches.get(0) {
-                    touch.set_value(Some((t.client_y() as f64, 0.0)));
+                    touch.set_value(Some((t.client_x() as f64, t.client_y() as f64, 0.0)));
                     pinch.set_value(None);
                 }
             }
             2 => {
                 touch.set_value(None);
-                pinch.set_value(pinch_distance(&ev));
+                pinch.set_value(pinch_state(&ev).map(|(d, cy)| (d, cy, 0.0)));
             }
             _ => {}
         }
@@ -154,26 +193,52 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
         let touches = ev.touches();
 
         if touches.length() >= 2 {
-            let Some(now) = pinch_distance(&ev) else { return };
-            if let Some(prev) = pinch.get_value() {
-                if prev > 1.0 {
-                    ev.prevent_default();
-                    v.zoom.update(|z| *z = (*z * (now / prev)).clamp(0.1, 12.0));
+            let Some((distance, centroid_y)) = pinch_state(&ev) else {
+                return;
+            };
+            if let Some((prev_distance, prev_y, acc)) = pinch.get_value() {
+                ev.prevent_default();
+                if prev_distance > 1.0 {
+                    v.zoom
+                        .update(|z| *z = (*z * (distance / prev_distance)).clamp(0.1, 12.0));
                 }
+                // Two-finger scrolling steps images, exactly as it does on a
+                // trackpad.
+                let acc = acc + (prev_y - centroid_y);
+                let steps = (acc / TOUCH_PIXELS_PER_SLICE).trunc();
+                pinch.set_value(Some((
+                    distance,
+                    centroid_y,
+                    acc - steps * TOUCH_PIXELS_PER_SLICE,
+                )));
+                if steps != 0.0 {
+                    v.step_slice(steps as i32);
+                }
+            } else {
+                pinch.set_value(Some((distance, centroid_y, 0.0)));
             }
-            pinch.set_value(Some(now));
             return;
         }
 
-        let (Some((last_y, acc)), Some(t)) = (touch.get_value(), touches.get(0)) else {
+        let (Some((last_x, last_y, acc)), Some(t)) = (touch.get_value(), touches.get(0)) else {
             return;
         };
         ev.prevent_default();
-        let y = t.client_y() as f64;
+        let (x, y) = (t.client_x() as f64, t.client_y() as f64);
+
+        if v.is_zoomed() {
+            v.pan.update(|(px, py)| {
+                *px += x - last_x;
+                *py += y - last_y;
+            });
+            touch.set_value(Some((x, y, 0.0)));
+            return;
+        }
+
         // Swiping up moves forward through the stack, matching the wheel.
         let acc = acc + (last_y - y);
         let steps = (acc / TOUCH_PIXELS_PER_SLICE).trunc();
-        touch.set_value(Some((y, acc - steps * TOUCH_PIXELS_PER_SLICE)));
+        touch.set_value(Some((x, y, acc - steps * TOUCH_PIXELS_PER_SLICE)));
         if steps != 0.0 {
             v.step_slice(steps as i32);
         }
@@ -184,6 +249,18 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
         pinch.set_value(None);
     };
 
+    // Bind the gestures that need `preventDefault` directly to the element,
+    // once it exists.
+    create_effect(move |_| {
+        let Some(stage) = stage_ref.get() else { return };
+        let target: &web_sys::EventTarget = stage.as_ref();
+        listen_active(target, "wheel", on_wheel);
+        listen_active(target, "touchstart", on_touchstart);
+        listen_active(target, "touchmove", on_touchmove);
+        listen_active(target, "touchend", on_touchend);
+        listen_active(target, "touchcancel", on_touchend);
+    });
+
     let transform = move || {
         let (px, py) = v.pan.get();
         format!("translate({px}px, {py}px) scale({})", v.zoom.get())
@@ -192,17 +269,27 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
     view! {
         <div
             class="stage"
-            class:panning=move || v.pan_mode.get()
+            node_ref=stage_ref
+            class:zoomed=move || v.is_zoomed()
             on:mousedown=on_mousedown
-            on:wheel=on_wheel
             on:dblclick=move |_| v.reset_view()
             on:contextmenu=move |ev: ev::MouseEvent| ev.prevent_default()
-            on:touchstart=on_touchstart
-            on:touchmove=on_touchmove
-            on:touchend=on_touchend
-            on:touchcancel=on_touchend
         >
             <canvas node_ref=canvas_ref style:transform=transform></canvas>
+
+            // A decode that failed must not take the viewer with it: say so
+            // over the image and leave every other control working.
+            <Show when=move || v.decode_error.get().is_some()>
+                <div class="stage-message error">
+                    <div class="sm-title">"This image could not be shown"</div>
+                    <div class="sm-body">{move || v.decode_error.get().unwrap_or_default()}</div>
+                    <div class="sm-body">"Use ↑ and ↓ to move to another image."</div>
+                </div>
+            </Show>
+
+            <Show when=move || v.busy.get() && v.decode_error.get().is_none()>
+                <div class="stage-busy">"Loading…"</div>
+            </Show>
 
             <Show when=move || v.overlays.get()>
                 <div class="overlay tl">
@@ -240,11 +327,12 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
     }
 }
 
-/// Distance between the first two touch points, for pinch zoom.
-fn pinch_distance(ev: &ev::TouchEvent) -> Option<f64> {
+/// Distance between the first two touch points and their midpoint's Y.
+fn pinch_state(ev: &ev::TouchEvent) -> Option<(f64, f64)> {
     let touches = ev.touches();
     let (a, b) = (touches.get(0)?, touches.get(1)?);
     let dx = (a.client_x() - b.client_x()) as f64;
     let dy = (a.client_y() - b.client_y()) as f64;
-    Some((dx * dx + dy * dy).sqrt())
+    let centroid_y = (a.client_y() + b.client_y()) as f64 / 2.0;
+    Some(((dx * dx + dy * dy).sqrt(), centroid_y))
 }

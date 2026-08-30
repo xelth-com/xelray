@@ -1,9 +1,14 @@
-//! Getting bytes out of the browser.
+//! Getting bytes out of the browser — as little of them as possible.
 //!
 //! Two entry points matter: a `<input type=file webkitdirectory>` pick, which
 //! already hands over a flat `FileList`, and a drag-and-drop of a folder,
-//! which hands over directory *entries* that have to be walked. Everything
-//! here stays in the browser — no request is ever made.
+//! which hands over directory *entries* that have to be walked.
+//!
+//! The `File` objects themselves are kept, not their contents. A `File` is a
+//! handle to bytes still sitting on disk, costing nothing until read, which
+//! is what lets the viewer hold a 500 MB study open in a 32-bit heap. Reads
+//! are deliberately narrow: [`read_prefix`] for indexing, [`read_all`] only
+//! for the one image being displayed.
 
 use js_sys::{Array, Uint8Array};
 use wasm_bindgen::prelude::*;
@@ -111,11 +116,22 @@ async fn read_entries_once(reader: &FileSystemDirectoryReader) -> Vec<FileSystem
         .collect()
 }
 
-/// Slurp one file into memory as `(name, bytes)`.
-pub async fn read_bytes(file: &File) -> Option<(String, Vec<u8>)> {
+/// Read the first `len` bytes of a file.
+///
+/// `Blob::slice` does not copy anything: it returns a view that the browser
+/// reads from disk when awaited, so indexing a study touches a few kilobytes
+/// per image rather than half a megabyte.
+pub async fn read_prefix(file: &File, len: usize) -> Option<Vec<u8>> {
+    let end = len.min(file.size() as usize) as i32;
+    let blob = file.slice_with_i32_and_i32(0, end).ok()?;
+    let buffer = JsFuture::from(blob.array_buffer()).await.ok()?;
+    Some(Uint8Array::new(&buffer).to_vec())
+}
+
+/// Read a whole file. Used for exactly one image at a time.
+pub async fn read_all(file: &File) -> Option<Vec<u8>> {
     let buffer = JsFuture::from(file.array_buffer()).await.ok()?;
-    let bytes = Uint8Array::new(&buffer).to_vec();
-    Some((file.name(), bytes))
+    Some(Uint8Array::new(&buffer).to_vec())
 }
 
 /// `DICOMDIR` indexes and the odd `.txt`/`.exe` viewer stub that ships on
