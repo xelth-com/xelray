@@ -281,14 +281,14 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
             // over the image and leave every other control working.
             <Show when=move || v.decode_error.get().is_some()>
                 <div class="stage-message error">
-                    <div class="sm-title">"This image could not be shown"</div>
+                    <div class="sm-title">{move || v.t("xelray.error.title")}</div>
                     <div class="sm-body">{move || v.decode_error.get().unwrap_or_default()}</div>
-                    <div class="sm-body">"Use ↑ and ↓ to move to another image."</div>
+                    <div class="sm-body">{move || v.t("xelray.error.hint")}</div>
                 </div>
             </Show>
 
             <Show when=move || v.busy.get() && v.decode_error.get().is_none()>
-                <div class="stage-busy">"Loading…"</div>
+                <div class="stage-busy">{move || v.t("xelray.loading")}</div>
             </Show>
 
             <Show when=move || v.overlays.get()>
@@ -320,8 +320,12 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
             {move || v.study.with(|s| {
                 s.as_ref()
                     .and_then(|st| st.series.get(v.series_idx.get()))
-                    .filter(|se| !se.warnings.is_empty())
-                    .map(|se| view! { <div class="warnbar">{se.warnings.join(" ")}</div> })
+                    .and_then(|se| se.unsupported)
+                    .map(|codec| view! {
+                        <div class="warnbar">
+                            {v.ta("xelray.warn.unsupported", &[("codec", codec)])}
+                        </div>
+                    })
             })}
         </div>
     }

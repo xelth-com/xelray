@@ -19,6 +19,7 @@
 //! The result is a memory ceiling set by the cache, not by the study.
 
 mod files;
+mod i18n;
 mod shortcuts;
 mod viewport;
 
@@ -42,12 +43,26 @@ const FAST_STEP: i32 = 10;
 /// becoming the thing that thrashes the cache.
 const PREFETCH_RADIUS: i32 = 3;
 
+/// Translation keys for [`WINDOW_PRESETS`], in the same order.
+///
+/// The preset names live in the translation table rather than in the core
+/// crate, which has no business knowing what language anyone reads.
+const PRESET_KEYS: &[&str] = &[
+    "xelray.preset.soft",
+    "xelray.preset.lung",
+    "xelray.preset.bone",
+    "xelray.preset.brain",
+];
+
 /// Every piece of viewer state, bundled so the sub-views can take one prop.
 ///
 /// Leptos signals and `StoredValue`s are `Copy`, so this struct is too — it
 /// is passed by value into every closure below.
 #[derive(Clone, Copy)]
 pub struct Viewer {
+    /// Language state. Held here rather than in Leptos context so it is
+    /// reachable from async tasks, which have no context of their own.
+    pub i18n: i18n::I18n,
     pub study: RwSignal<Option<Rc<Study>>>,
     /// The browser's file handles, positionally matching
     /// [`xelray_core::Instance::file_index`]. Handles only — never contents.
@@ -100,6 +115,7 @@ impl Default for Viewer {
 impl Viewer {
     pub fn new() -> Self {
         Self {
+            i18n: i18n::I18n::new(),
             study: create_rw_signal(None),
             files: store_value(Vec::new()),
             cache: store_value(SliceCache::default()),
@@ -124,6 +140,16 @@ impl Viewer {
             notice: create_rw_signal(None),
             drag_over: create_rw_signal(false),
         }
+    }
+
+    /// Translate a key. Reactive inside a view closure.
+    pub fn t(&self, key: &'static str) -> String {
+        self.i18n.t(key)
+    }
+
+    /// Translate with `{name}` substitutions.
+    pub fn ta(&self, key: &'static str, args: &[(&str, &str)]) -> String {
+        self.i18n.ta(key, args)
     }
 
     pub fn slice_count(&self) -> usize {
@@ -258,7 +284,7 @@ impl Viewer {
                 .collect();
 
             if picked.is_empty() {
-                this.notice.set(Some("No DICOM files found in that drop.".into()));
+                this.notice.set(Some(this.t("xelray.no_dicom")));
                 return;
             }
 
@@ -305,14 +331,18 @@ impl Viewer {
             this.progress.set(None);
 
             if acc.series.is_empty() {
-                this.notice
-                    .set(Some(format!("None of those {total} files were readable DICOM.")));
+                this.notice.set(Some(
+                    this.ta("xelray.none_readable", &[("total", &total.to_string())]),
+                ));
                 return;
             }
             if !acc.skipped.is_empty() {
-                this.notice.set(Some(format!(
-                    "{} of {total} files were not DICOM and were ignored.",
-                    acc.skipped.len()
+                this.notice.set(Some(this.ta(
+                    "xelray.some_ignored",
+                    &[
+                        ("skipped", &acc.skipped.len().to_string()),
+                        ("total", &total.to_string()),
+                    ],
                 )));
             }
 
@@ -497,6 +527,7 @@ pub fn App() -> impl IntoView {
         v.show_current();
     });
 
+    v.i18n.start();
     shortcuts::install(v);
 
     let on_drop = move |ev: ev::DragEvent| {
@@ -558,21 +589,17 @@ fn Landing(v: Viewer) -> impl IntoView {
         <div class="landing">
             <div class="landing-brand">
                 <span class="logo big">"XelRay"</span>
-                <span class="tag">"in-browser DICOM viewer"</span>
+                <span class="tag">{move || v.t("xelray.tagline")}</span>
             </div>
 
             <div class="dropzone">
                 <div class="dz-icon">"⊕"</div>
-                <h1>"Drop DICOM files or folder here"</h1>
-                <p class="dz-sub">
-                    "Straight from a hospital CD — the whole "
-                    <code>"DICOM"</code>
-                    " folder works."
-                </p>
+                <h1>{move || v.t("xelray.drop.title")}</h1>
+                <p class="dz-sub">{move || v.t("xelray.drop.sub")}</p>
 
                 <div class="dz-buttons">
                     <label class="btn">
-                        "Choose folder"
+                        {move || v.t("xelray.drop.folder")}
                         // `webkitdirectory` is the only cross-browser way to
                         // pick a whole directory; Trunk leaves it verbatim.
                         <input
@@ -584,7 +611,7 @@ fn Landing(v: Viewer) -> impl IntoView {
                         />
                     </label>
                     <label class="btn ghost">
-                        "Choose files"
+                        {move || v.t("xelray.drop.files")}
                         <input type="file" multiple="" on:change=pick />
                     </label>
                 </div>
@@ -596,7 +623,10 @@ fn Landing(v: Viewer) -> impl IntoView {
                         view! {
                             <div class="progress">
                                 <div class="bar"><div class="fill" style:width=format!("{pct:.1}%")></div></div>
-                                <span>{format!("{done} of {total} files indexed…")}</span>
+                                <span>{v.ta(
+                                    "xelray.indexing",
+                                    &[("done", &done.to_string()), ("total", &total.to_string())],
+                                )}</span>
                             </div>
                         }
                     }}
@@ -607,9 +637,7 @@ fn Landing(v: Viewer) -> impl IntoView {
                 </Show>
             </div>
 
-            <p class="privacy">
-                "🔒 Files are processed locally in your browser and never uploaded."
-            </p>
+            <p class="privacy">{move || v.t("xelray.privacy")}</p>
 
             <p class="landing-links">
                 <a href="https://xelth.com">"xelth.com"</a>
@@ -646,7 +674,7 @@ fn ViewerPane(v: Viewer) -> impl IntoView {
             <Show when=move || !v.rail.get()>
                 <button
                     class="rail-tab"
-                    title="Show the controls panel (S)"
+                    title=move || v.t("xelray.rail.show_panel")
                     on:click=move |_| v.rail.set(true)
                 >"☰"</button>
             </Show>
@@ -668,7 +696,7 @@ fn Rail(v: Viewer) -> impl IntoView {
                 <span class="logo">"XelRay"</span>
                 <button
                     class="icon"
-                    title="Hide this panel — the image fills the window (S)"
+                    title=move || v.t("xelray.rail.hide_panel")
                     on:click=move |_| v.rail.set(false)
                 >"‹"</button>
             </div>
@@ -676,7 +704,7 @@ fn Rail(v: Viewer) -> impl IntoView {
             <div class="rail-body">
                 <div class="rail-sec">
                     <div class="rail-head">
-                        "Scans in this study"
+                        {move || v.t("xelray.rail.scans")}
                         <span class="kbd-hint">"[ ]"</span>
                     </div>
                     {move || v.study.with(|s| {
@@ -686,22 +714,29 @@ fn Rail(v: Viewer) -> impl IntoView {
                             .enumerate()
                             .map(|(i, se)| {
                                 let label = se.label();
-                                let count = se.len();
+                                let count = se.len().to_string();
                                 let modality = se.modality.clone();
-                                let warnings = se.warnings.clone();
+                                let args = [
+                                    ("modality", modality.as_str()),
+                                    ("count", count.as_str()),
+                                ];
+                                let unsupported = se.unsupported;
                                 view! {
                                     <button
                                         class="series"
                                         class:active=move || v.series_idx.get() == i
-                                        title=format!("Show this scan — {modality}, {count} images")
+                                        title=v.ta("xelray.series.tip", &args)
                                         on:click=move |_| v.select_series(i)
                                     >
                                         <span class="s-label">{label}</span>
                                         <span class="s-meta">
-                                            {format!("{modality} · {count} images")}
+                                            {v.ta("xelray.series.meta", &args)}
                                         </span>
-                                        {(!warnings.is_empty()).then(|| view! {
-                                            <span class="s-warn">{warnings.join(" ")}</span>
+                                        {unsupported.map(|codec| view! {
+                                            <span class="s-warn">
+                                                {v.ta("xelray.warn.unsupported",
+                                                      &[("codec", codec)])}
+                                            </span>
                                         })}
                                     </button>
                                 }
@@ -712,12 +747,12 @@ fn Rail(v: Viewer) -> impl IntoView {
 
                 <div class="rail-sec">
                     <div class="rail-head">
-                        "Brightness"
+                        {move || v.t("xelray.rail.brightness")}
                         <span class="kbd-hint">"1-4"</span>
                     </div>
                     <div class="grid2">
-                        {WINDOW_PRESETS.iter().enumerate().map(|(i, (name, width, center))| {
-                            let (width, center) = (*width, *center);
+                        {PRESET_KEYS.iter().enumerate().map(|(i, key)| {
+                            let (_, width, center) = WINDOW_PRESETS[i];
                             view! {
                                 <button
                                     class="tool"
@@ -725,52 +760,54 @@ fn Rail(v: Viewer) -> impl IntoView {
                                         (v.ww.get() - width).abs() < 0.5
                                             && (v.wl.get() - center).abs() < 0.5
                                     }
-                                    title=format!(
-                                        "Set brightness for viewing {} (key {})",
-                                        name.to_lowercase(), i + 1,
-                                    )
+                                    title=move || v.ta("xelray.preset.tip", &[
+                                        ("name", &v.t(key).to_lowercase()),
+                                        ("key", &(i + 1).to_string()),
+                                    ])
                                     on:click=move |_| v.set_window(width, center)
-                                >{*name}</button>
+                                >{move || v.t(key)}</button>
                             }
                         }).collect::<Vec<_>>()}
                     </div>
-                    <div class="readout" title="Drag on the image to fine-tune">
+                    <div class="readout" title=move || v.t("xelray.window.tip")>
                         {move || format!("WW {:.0}  WL {:.0}", v.ww.get(), v.wl.get())}
                     </div>
                 </div>
 
                 <div class="rail-sec">
                     <div class="rail-head">
-                        "Size"
+                        {move || v.t("xelray.rail.size")}
                         <span class="kbd-hint">"+ - 0"</span>
                     </div>
                     <div class="grid2">
-                        <button class="tool" title="Make the image bigger (+)"
-                            on:click=move |_| v.zoom_by(1.25)>"Zoom in"</button>
-                        <button class="tool" title="Make the image smaller (−)"
-                            on:click=move |_| v.zoom_by(1.0 / 1.25)>"Zoom out"</button>
+                        <button class="tool" title=move || v.t("xelray.zoom_in.tip")
+                            on:click=move |_| v.zoom_by(1.25)
+                        >{move || v.t("xelray.zoom_in")}</button>
+                        <button class="tool" title=move || v.t("xelray.zoom_out.tip")
+                            on:click=move |_| v.zoom_by(1.0 / 1.25)
+                        >{move || v.t("xelray.zoom_out")}</button>
                     </div>
                     <button
                         class="tool wide"
-                        title="Reset zoom and position (0, or double-click the image)"
+                        title=move || v.t("xelray.fit.tip")
                         on:click=move |_| v.reset_view()
-                    >"Fit to window"</button>
+                    >{move || v.t("xelray.fit")}</button>
                     <button
                         class="tool wide"
-                        title="Show or hide the name, date and numbers over the image (O)"
+                        title=move || v.t("xelray.text.tip")
                         on:click=move |_| v.overlays.update(|o| *o = !*o)
                     >
                         {move || if v.overlays.get() {
-                            "Hide text on image"
+                            v.t("xelray.hide_text")
                         } else {
-                            "Show text on image"
+                            v.t("xelray.show_text")
                         }}
                     </button>
                 </div>
 
                 <div class="rail-sec">
                     <div class="rail-head">
-                        "Image"
+                        {move || v.t("xelray.rail.image")}
                         <span class="kbd-hint">"↑ ↓"</span>
                     </div>
                     <div class="readout">
@@ -782,7 +819,7 @@ fn Rail(v: Viewer) -> impl IntoView {
                     <input
                         type="range"
                         class="scrub"
-                        title="Drag to move through the images"
+                        title=move || v.t("xelray.scrub.tip")
                         min="0"
                         prop:max=move || (v.slice_count().saturating_sub(1)).to_string()
                         prop:value=move || v.slice_idx.get().to_string()
@@ -798,17 +835,33 @@ fn Rail(v: Viewer) -> impl IntoView {
             <div class="rail-foot">
                 <button
                     class="tool wide"
-                    title="List every keyboard shortcut (? or H)"
+                    title=move || v.t("xelray.shortcuts.tip")
                     on:click=move |_| v.help.set(true)
                 >
-                    "Keyboard shortcuts" <span class="kbd-hint">"?"</span>
+                    {move || v.t("xelray.shortcuts")}
+                    <span class="kbd-hint">"?"</span>
                 </button>
                 <button
                     class="tool wide"
-                    title="Close this study and choose different files"
+                    title=move || v.t("xelray.open_another.tip")
                     on:click=move |_| v.unload()
-                >"Open another study"</button>
+                >{move || v.t("xelray.open_another")}</button>
+
                 <div class="rail-links">
+                    // Unobtrusive by design: a bare select that looks like the
+                    // link row it sits in, not a control competing for
+                    // attention next to the image.
+                    <select
+                        class="lang"
+                        title=move || v.t("xelray.rail.language")
+                        prop:value=move || v.i18n.lang.get()
+                        on:change=move |ev| v.i18n.set_lang(&event_target_value(&ev))
+                    >
+                        {i18n::SUPPORTED_LANGS.iter().map(|(code, label)| view! {
+                            <option value=*code>{*label}</option>
+                        }).collect::<Vec<_>>()}
+                    </select>
+                    " · "
                     <a href="https://xelth.com">"xelth.com"</a>
                     " · "
                     <a href=REPO_URL target="_blank" rel="noreferrer">"GitHub"</a>
@@ -826,36 +879,33 @@ fn HelpOverlay(v: Viewer) -> impl IntoView {
             // Clicks inside the card must not fall through to the backdrop.
             <div class="help-card" on:click=move |ev: ev::MouseEvent| ev.stop_propagation()>
                 <div class="help-title">
-                    "Keyboard shortcuts"
-                    <button class="icon" title="Close (Esc)"
+                    {move || v.t("xelray.shortcuts")}
+                    <button class="icon" title=move || v.t("xelray.help.close")
                         on:click=move |_| v.help.set(false)>"×"</button>
                 </div>
                 <div class="help-grid">
                     {shortcuts::HELP.iter().map(|(group, keys, what)| view! {
                         <>
-                            <div class="hk-group">{*group}</div>
+                            // An empty group key continues the row above it.
+                            <div class="hk-group">
+                                {move || if group.is_empty() {
+                                    String::new()
+                                } else {
+                                    v.t(group)
+                                }}
+                            </div>
                             <div class="hk-keys">
                                 {keys.split(' ').map(|k| view! { <kbd>{k.replace('_', " ")}</kbd> })
                                     .collect::<Vec<_>>()}
                             </div>
-                            <div class="hk-what">{*what}</div>
+                            <div class="hk-what">{move || v.t(what)}</div>
                         </>
                     }).collect::<Vec<_>>()}
                 </div>
                 <div class="help-foot">
-                    <p>
-                        "Mouse — wheel steps images, ctrl+wheel zooms, double-click fits. \
-                         Drag to set brightness; once zoomed in, drag moves the image \
-                         instead and Shift+drag sets brightness. Middle-drag always moves."
-                    </p>
-                    <p>
-                        "Trackpad — two-finger scroll steps images, pinch zooms. \
-                         Touch — swipe to step, pinch to zoom, drag to move when zoomed."
-                    </p>
-                    <p class="help-note">
-                        "Home, End, PageUp and PageDown also work, if your keyboard \
-                         has them without holding Fn."
-                    </p>
+                    <p>{move || v.t("xelray.help.mouse")}</p>
+                    <p>{move || v.t("xelray.help.trackpad")}</p>
+                    <p class="help-note">{move || v.t("xelray.help.fnkeys")}</p>
                 </div>
             </div>
         </div>

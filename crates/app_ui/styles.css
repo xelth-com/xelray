@@ -4,17 +4,40 @@
    that folds away entirely. */
 
 :root {
-    --bg:       #0b0d10;
-    --panel:    #14181d;
-    --panel-2:  #1b2027;
-    --line:     #262d36;
-    --text:     #dfe4ea;
-    --muted:    #8b95a3;
-    --accent:   #4ea3ff;
-    --warn:     #ffb454;
-    --rail:     196px;
+    /* Palette borrowed from xelth.com: its deep teal "felt", cream text and
+       gold accent, so the two read as one product. Two deliberate
+       departures, both because this is a radiology viewer:
+
+       - The stage stays pure black. Any tint behind a greyscale image
+         shifts how bright the image itself looks, and a doctor reading
+         from it should not have to correct for the furniture.
+       - Everything is pulled a stop or two dimmer than on the main site.
+         Chrome sitting beside black at full contrast is what makes eyes
+         ache over a long session. Cream is used at reading weight; gold
+         appears only where something is actually selected. */
+
+    --stage:    #000000;  /* the image surround — never tinted */
+    --bg:       #001611;  /* app ground, a darkened xelth felt */
+    --panel:    #00241c;  /* xelth.com's house background, as the rail */
+    --panel-2:  #033126;  /* hover / selected surface */
+    --line:     #0d3b2f;  /* dividers, dim enough to read as separation */
+
+    --text:     #cdbfa6;  /* xelth.com body cream */
+    --bright:   #ead8c1;  /* xelth.com heading cream — emphasis only */
+    --muted:    #8f8168;
+    --faint:    #6b6252;  /* key hints, the dimmest thing on screen */
+
+    --accent:       #d9b36a;  /* xelth.com gold */
+    --accent-hi:    #f5c451;  /* its brighter sibling, for hover */
+    --warn:         #e0836f;  /* xelth.com's soft terracotta */
+
     --radius:   7px;
-    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    /* Cascadia Mono is xelth.com's signature face. Used here for the
+       wordmark, labels and readouts; prose stays in the system UI face,
+       which is easier to read in bulk for someone who is a patient rather
+       than a developer. */
+    --mono: "Cascadia Mono", "Lucida Console", Consolas, ui-monospace, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +49,7 @@ html, body {
     overflow: hidden;
     background: var(--bg);
     color: var(--text);
-    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 13px/1.5 var(--sans);
     -webkit-font-smoothing: antialiased;
 }
 
@@ -46,7 +69,13 @@ a:hover { text-decoration: underline; }
     z-index: 50;
 }
 
-.logo { font-size: 15px; font-weight: 650; letter-spacing: -0.2px; }
+.logo {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--bright);
+}
 .logo::first-letter { color: var(--accent); }
 .logo.big { font-size: 27px; }
 .tag { color: var(--muted); font-size: 12.5px; }
@@ -62,6 +91,12 @@ a:hover { text-decoration: underline; }
     gap: 20px;
     padding: 40px 20px;
     overflow-y: auto;
+    /* A faint echo of xelth.com's lamp-lit felt. Confined to the landing
+       screen, which has no image on it — nothing like this is allowed
+       anywhere near the stage. */
+    background:
+        radial-gradient(ellipse 70% 45% at 50% 18%, rgba(26, 118, 88, 0.16), rgba(26, 118, 88, 0) 70%),
+        radial-gradient(ellipse 120% 120% at 50% 45%, rgba(0, 18, 13, 0) 45%, rgba(0, 10, 7, 0.6) 100%);
 }
 
 .landing-brand { display: flex; align-items: baseline; gap: 10px; }
@@ -92,12 +127,12 @@ a:hover { text-decoration: underline; }
     padding: 9px 18px;
     border-radius: var(--radius);
     background: var(--accent);
-    color: #06111d;
+    color: #0b1a14;
     font-weight: 600;
     cursor: pointer;
     border: 1px solid transparent;
 }
-.btn:hover { filter: brightness(1.1); }
+.btn:hover { background: var(--accent-hi); }
 .btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
 .btn.ghost:hover { background: var(--panel-2); filter: none; }
 /* The real input stays in the DOM (labels need it) but never shows. */
@@ -169,7 +204,7 @@ a:hover { text-decoration: underline; }
     place-items: center;
     border: 1px solid var(--line);
     border-radius: 6px;
-    background: rgba(20, 24, 29, 0.82);
+    background: rgba(0, 36, 28, 0.82);
     backdrop-filter: blur(3px);
     color: var(--muted);
     font-size: 14px;
@@ -179,12 +214,19 @@ a:hover { text-decoration: underline; }
 }
 .rail-tab:hover { opacity: 1; color: var(--text); }
 
-.rail-body { flex: 1; overflow-y: auto; padding: 4px 8px 8px; }
+.rail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(234, 216, 193, 0.15) transparent;
+}
 
 .rail-sec { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .rail-sec:last-child { border-bottom: none; }
 
 .rail-head {
+    font-family: var(--mono);
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -201,7 +243,7 @@ a:hover { text-decoration: underline; }
     font-size: 10px;
     letter-spacing: 0;
     text-transform: none;
-    color: #5c6673;
+    color: var(--faint);
 }
 
 .series {
@@ -218,7 +260,11 @@ a:hover { text-decoration: underline; }
     cursor: pointer;
 }
 .series:hover { background: var(--panel-2); }
-.series.active { background: var(--panel-2); border-color: var(--accent); }
+.series.active {
+    background: var(--panel-2);
+    border-color: var(--accent);
+    color: var(--bright);
+}
 .s-label {
     display: block;
     font-size: 12px;
@@ -231,6 +277,7 @@ a:hover { text-decoration: underline; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 
 .tool {
+    font-family: var(--mono);
     padding: 5px 6px;
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -244,6 +291,7 @@ a:hover { text-decoration: underline; }
     text-overflow: ellipsis;
 }
 .tool:hover { background: var(--panel-2); }
+.tool:hover { border-color: var(--line); }
 .tool.active { border-color: var(--accent); color: var(--accent); }
 .tool.wide {
     display: flex;
@@ -266,11 +314,31 @@ a:hover { text-decoration: underline; }
 
 .rail-foot { padding: 8px; border-top: 1px solid var(--line); }
 .rail-links {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
     margin-top: 8px;
-    text-align: center;
     color: var(--muted);
     font-size: 11px;
 }
+
+/* The language picker sits in the link row and is dressed as one of the
+   links: present when looked for, silent otherwise. */
+.lang {
+    appearance: none;
+    padding: 1px 3px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+}
+.lang:hover { color: var(--accent); }
+.lang:focus-visible { outline: 1px solid var(--accent); border-radius: 3px; }
+/* The popup itself is drawn by the OS, so it needs real colours. */
+.lang option { background: var(--panel); color: var(--text); }
 
 /* ---------- stage ---------- */
 
@@ -283,7 +351,7 @@ a:hover { text-decoration: underline; }
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    background: #000;
+    background: var(--stage);
     cursor: crosshair;
     /* Every gesture here is custom: never let a drag select the overlay
        text, and never let a swipe scroll or bounce the page. */
@@ -304,11 +372,11 @@ a:hover { text-decoration: underline; }
     padding: 16px 20px;
     border: 1px solid var(--line);
     border-radius: 10px;
-    background: rgba(20, 24, 29, 0.94);
+    background: rgba(0, 36, 28, 0.94);
     text-align: center;
     pointer-events: none;
 }
-.stage-message.error { border-color: rgba(255, 180, 84, 0.45); }
+.stage-message.error { border-color: rgba(224, 131, 111, 0.45); }
 .sm-title { color: var(--warn); font-weight: 600; margin-bottom: 6px; }
 .sm-body {
     color: var(--muted);
@@ -324,7 +392,7 @@ a:hover { text-decoration: underline; }
     transform: translateX(-50%);
     padding: 4px 12px;
     border-radius: 999px;
-    background: rgba(20, 24, 29, 0.8);
+    background: rgba(0, 36, 28, 0.82);
     color: var(--muted);
     font-size: 11.5px;
     pointer-events: none;
@@ -343,7 +411,7 @@ a:hover { text-decoration: underline; }
     position: absolute;
     padding: 8px 12px;
     max-width: 45%;
-    color: rgba(255, 255, 255, 0.72);
+    color: rgba(234, 216, 193, 0.62);
     font-family: var(--mono);
     font-size: 11.5px;
     pointer-events: none;
@@ -362,8 +430,8 @@ a:hover { text-decoration: underline; }
     left: 0;
     right: 0;
     padding: 6px 14px;
-    background: rgba(255, 180, 84, 0.14);
-    border-bottom: 1px solid rgba(255, 180, 84, 0.3);
+    background: rgba(224, 131, 111, 0.13);
+    border-bottom: 1px solid rgba(224, 131, 111, 0.3);
     color: var(--warn);
     font-size: 12px;
     text-align: center;
@@ -379,7 +447,7 @@ a:hover { text-decoration: underline; }
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgba(0, 0, 0, 0.62);
+    background: rgba(0, 12, 9, 0.66);
     backdrop-filter: blur(2px);
 }
 
@@ -390,7 +458,7 @@ a:hover { text-decoration: underline; }
     border: 1px solid var(--line);
     border-radius: 12px;
     background: var(--panel);
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
 }
 
 .help-title {
@@ -443,7 +511,7 @@ kbd {
 }
 .help-foot p { margin: 0 0 6px; }
 .help-foot p:last-child { margin-bottom: 0; }
-.help-note { color: #5c6673; }
+.help-note { color: var(--faint); }
 
 @media (max-width: 640px) {
     :root { --rail: 160px; }

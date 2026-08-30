@@ -52,6 +52,10 @@ backend, no upload, no account. Close the tab and nothing is left anywhere.
   also warms the neighbours so scrolling stays smooth.
 - **Graceful about what it cannot decode** — an unsupported transfer syntax
   produces a per-series warning, not a crash.
+- **Nine languages, and none required** — the full English UI is compiled in,
+  so the app works with no network and no server. Where a `/i18n/{lang}`
+  backend exists (as on xelth.com) its translations are merged over the top,
+  key by key. See [`locales/`](locales/).
 
 ## Keyboard
 
@@ -125,6 +129,25 @@ crates.
 Rendering is a plain 2D canvas: the window transform maps modality values to
 8-bit grey into a reused `ImageData` buffer, and zoom/pan are a CSS transform
 on the canvas element, so dragging never triggers a re-decode.
+
+### Look
+
+The palette is xelth.com's — its deep teal ground, cream text and gold
+accent — so the two read as one product. Two things are deliberately not
+borrowed. The stage around the image stays pure black, because any tint
+behind a greyscale scan changes how bright the scan itself appears; and every
+colour is pulled a stop or two dimmer than on the main site, because chrome
+at full contrast beside a black stage is what makes eyes ache over a long
+reading session.
+
+### Languages
+
+English is compiled into the binary, so XelRay is complete offline — on a USB
+stick, self-hosted, or opened from `file://`. After first paint it asks its
+own origin for `/i18n/{lang}` (the endpoint xelth.com already serves) and
+merges anything it gets back over the embedded strings, key by key. A 404, a
+timeout, or no server at all is a non-event. Language follows
+`navigator.language` and can be changed in the rail footer.
 
 ### Memory
 

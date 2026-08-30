@@ -49,7 +49,7 @@ fn ingests_a_ct_study_into_one_series() {
     assert_eq!(series.len(), n);
     assert_eq!(study.image_count(), n);
     assert_eq!(series.modality, "CT");
-    assert!(series.warnings.is_empty(), "{:?}", series.warnings);
+    assert!(series.unsupported.is_none(), "{:?}", series.unsupported);
     assert!(!study.info.patient_name.is_empty());
 }
 

@@ -13,22 +13,25 @@ use wasm_bindgen::JsCast;
 
 use crate::{Viewer, FAST_STEP};
 
-/// The cheat sheet, rendered by the `?` overlay: `(group, keys, meaning)`.
+/// The cheat sheet, rendered by the `?` overlay:
+/// `(group key, keys, meaning key)`.
 ///
-/// Keys are split on spaces into individual `<kbd>` chips.
+/// The group and meaning are translation keys, not text — the key chips
+/// themselves are the same on every keyboard and stay literal. An empty
+/// group continues the one above it.
 pub const HELP: &[(&str, &str, &str)] = &[
-    ("Images", "↑ ↓", "Previous / next image"),
-    ("", "Shift+↑ Shift+↓", "Jump 10 images"),
-    ("", "g G", "First / last image"),
-    ("Series", "← →", "Previous / next series"),
-    ("", "[ ]", "The same, either hand"),
-    ("Window", "1 2 3 4", "Soft tissue · Lung · Bone · Brain"),
-    ("View", "= -", "Zoom in / out"),
-    ("", "0 f", "Fit to window, undo zoom"),
-    ("Layout", "s Tab", "Show / hide the panel"),
-    ("", "o", "Show / hide text over the image"),
-    ("", "? h", "This list"),
-    ("", "Esc", "Close this list"),
+    ("xelray.help.group.images", "↑ ↓", "xelray.help.step"),
+    ("", "Shift+↑ Shift+↓", "xelray.help.jump"),
+    ("", "g G", "xelray.help.ends"),
+    ("xelray.help.group.series", "← →", "xelray.help.series"),
+    ("", "[ ]", "xelray.help.series_alt"),
+    ("xelray.help.group.window", "1 2 3 4", "xelray.help.presets"),
+    ("xelray.help.group.view", "= -", "xelray.help.zoom"),
+    ("", "0 f", "xelray.help.fit"),
+    ("xelray.help.group.layout", "s Tab", "xelray.help.panel"),
+    ("", "o", "xelray.help.overlays"),
+    ("", "? h", "xelray.help.this"),
+    ("", "Esc", "xelray.help.close_list"),
 ];
 
 /// Install the window-level key handler.

@@ -131,9 +131,9 @@ pub struct Series {
     pub default_window: Option<(f64, f64)>,
     /// Direction cosines from the first image, used for sorting.
     orientation: Option<[f64; 6]>,
-    /// Non-fatal problems — e.g. a transfer syntax this build cannot decode.
-    /// Surfaced in the UI as a per-series warning instead of a panic.
-    pub warnings: Vec<String>,
+    /// Set when the series is compressed with a codec this build cannot
+    /// decode. Surfaced in the UI as a per-series warning instead of a panic.
+    pub unsupported: Option<&'static str>,
 }
 
 impl Series {
@@ -219,19 +219,19 @@ impl std::error::Error for XelRayError {}
 /// JPEG 2000 needs OpenJPEG, a C library that does not build for
 /// `wasm32-unknown-unknown`; rather than let every slice fail with an opaque
 /// message we detect it up front and warn once per series.
-fn unsupported_reason(ts_uid: &str) -> Option<&'static str> {
+///
+/// The result is the codec's name only — a proper noun the UI can drop into a
+/// translated sentence, rather than an English sentence the UI would have to
+/// show verbatim in every language.
+pub fn unsupported_codec(ts_uid: &str) -> Option<&'static str> {
     match ts_uid.trim_end_matches('\0') {
-        "1.2.840.10008.1.2.4.90" | "1.2.840.10008.1.2.4.91" => {
-            Some("JPEG 2000 — not supported in the WebAssembly build")
-        }
-        "1.2.840.10008.1.2.4.92" | "1.2.840.10008.1.2.4.93" => {
-            Some("JPEG 2000 Part 2 — not supported in the WebAssembly build")
-        }
+        "1.2.840.10008.1.2.4.90" | "1.2.840.10008.1.2.4.91" => Some("JPEG 2000"),
+        "1.2.840.10008.1.2.4.92" | "1.2.840.10008.1.2.4.93" => Some("JPEG 2000 Part 2"),
         "1.2.840.10008.1.2.4.100" | "1.2.840.10008.1.2.4.101" | "1.2.840.10008.1.2.4.102" => {
-            Some("MPEG video — not supported")
+            Some("MPEG video")
         }
         "1.2.840.10008.1.2.4.110" | "1.2.840.10008.1.2.4.111" | "1.2.840.10008.1.2.4.112"
-        | "1.2.840.10008.1.2.4.113" => Some("JPEG XL — not supported in the WebAssembly build"),
+        | "1.2.840.10008.1.2.4.113" => Some("JPEG XL"),
         _ => None,
     }
 }
@@ -336,8 +336,10 @@ pub fn decode_slice(bytes: &[u8]) -> Result<Slice, XelRayError> {
     let body = body_at_magic(bytes)?;
     let obj = FileDicomObject::from_reader(body).map_err(|e| XelRayError::Decode(e.to_string()))?;
 
-    if let Some(reason) = unsupported_reason(obj.meta().transfer_syntax()) {
-        return Err(XelRayError::Decode(reason.to_owned()));
+    if let Some(codec) = unsupported_codec(obj.meta().transfer_syntax()) {
+        return Err(XelRayError::Decode(format!(
+            "{codec} is not supported in this build"
+        )));
     }
 
     let decoded = obj
@@ -384,10 +386,6 @@ pub fn push_header(study: &mut Study, by_uid: &mut HashMap<String, usize>, heade
     let idx = *by_uid
         .entry(header.series_instance_uid.clone())
         .or_insert_with(|| {
-            let mut warnings = Vec::new();
-            if let Some(reason) = unsupported_reason(&header.transfer_syntax) {
-                warnings.push(format!("Compressed with {reason}. Images cannot be shown."));
-            }
             study.series.push(Series {
                 series_instance_uid: header.series_instance_uid.clone(),
                 series_description: header.series_description.clone(),
@@ -396,7 +394,7 @@ pub fn push_header(study: &mut Study, by_uid: &mut HashMap<String, usize>, heade
                 instances: Vec::new(),
                 default_window: header.window,
                 orientation: header.orientation,
-                warnings,
+                unsupported: unsupported_codec(&header.transfer_syntax),
             });
             study.series.len() - 1
         });

@@ -26,6 +26,8 @@ js-sys = "0.3"
 [dependencies.web-sys]
 version = "0.3"
 features = [
+    "AbortController",
+    "AbortSignal",
     "Blob",
     "CanvasRenderingContext2d",
     "DataTransfer",
@@ -47,7 +49,13 @@ features = [
     "HtmlInputElement",
     "ImageData",
     "KeyboardEvent",
+    "HtmlSelectElement",
     "MouseEvent",
+    "Navigator",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Storage",
     "Touch",
     "TouchEvent",
     "TouchList",
