@@ -1,0 +1,6 @@
+/target/
+**/dist/
+Cargo.lock.bak
+
+# Real patient scans used by the xelray_core tests. Never commit these.
+crates/xelray_core/tests/data/

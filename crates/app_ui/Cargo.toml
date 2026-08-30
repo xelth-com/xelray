@@ -1,0 +1,53 @@
+[package]
+name = "app_ui"
+description = "XelRay browser front end — Leptos 0.6 CSR, compiled to WebAssembly."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+autobins = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "app_ui_main"
+path = "src/main.rs"
+
+[dependencies]
+leptos = { workspace = true }
+xelray_core = { path = "../xelray_core" }
+console_error_panic_hook = "0.1"
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = "0.3"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Blob",
+    "CanvasRenderingContext2d",
+    "DataTransfer",
+    "DataTransferItem",
+    "DataTransferItemList",
+    "Document",
+    "DomRect",
+    "DragEvent",
+    "Element",
+    "Event",
+    "EventTarget",
+    "File",
+    "FileList",
+    "FileSystemDirectoryEntry",
+    "FileSystemDirectoryReader",
+    "FileSystemEntry",
+    "FileSystemFileEntry",
+    "HtmlCanvasElement",
+    "HtmlInputElement",
+    "ImageData",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Window",
+    "WheelEvent",
+]

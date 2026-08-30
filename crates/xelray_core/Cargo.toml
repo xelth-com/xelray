@@ -1,0 +1,14 @@
+[package]
+name = "xelray_core"
+description = "DICOM ingest, series grouping and pixel decoding for XelRay."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dicom-object = { workspace = true }
+dicom-core = { workspace = true }
+dicom-dictionary-std = { workspace = true }
+dicom-pixeldata = { workspace = true }

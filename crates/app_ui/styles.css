@@ -1,0 +1,296 @@
+/* XelRay — dark, minimal, no framework.
+   Radiology reading is done on black; everything here stays out of the way
+   of the image. */
+
+:root {
+    --bg:       #0b0d10;
+    --panel:    #14181d;
+    --panel-2:  #1b2027;
+    --line:     #262d36;
+    --text:     #dfe4ea;
+    --muted:    #8b95a3;
+    --accent:   #4ea3ff;
+    --warn:     #ffb454;
+    --radius:   8px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.app {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* A dropped folder is accepted anywhere on the page, so the cue is global. */
+.app.dropping { outline: 2px dashed var(--accent); outline-offset: -8px; }
+
+/* ---------- chrome ---------- */
+
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+}
+
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.logo { font-size: 19px; font-weight: 650; letter-spacing: -0.2px; }
+.logo::first-letter { color: var(--accent); }
+.tag { color: var(--muted); font-size: 12.5px; }
+.topbar-right { display: flex; align-items: center; gap: 14px; }
+.by { color: var(--muted); font-size: 12.5px; }
+
+.footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 12.5px;
+}
+
+main { flex: 1; display: flex; min-height: 0; }
+
+/* ---------- landing ---------- */
+
+.landing {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    padding: 48px 20px;
+}
+
+.dropzone {
+    width: min(660px, 100%);
+    padding: 46px 32px;
+    text-align: center;
+    border: 2px dashed var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+}
+
+.dz-icon { font-size: 40px; color: var(--accent); line-height: 1; }
+.dropzone h1 { margin: 14px 0 6px; font-size: 22px; font-weight: 600; }
+.dz-sub { margin: 0; color: var(--muted); }
+.dz-sub code {
+    font-family: var(--mono);
+    background: var(--panel-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+
+.dz-buttons { display: flex; gap: 12px; justify-content: center; margin-top: 22px; }
+
+.btn {
+    display: inline-block;
+    padding: 9px 18px;
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: #06111d;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+.btn:hover { filter: brightness(1.1); }
+.btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+.btn.ghost:hover { background: var(--panel-2); filter: none; }
+/* The real input stays in the DOM (labels need it) but never shows. */
+.btn input[type="file"] { display: none; }
+
+button.ghost {
+    padding: 5px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+button.ghost:hover { background: var(--panel-2); }
+
+.privacy { margin: 0; color: var(--muted); }
+.blurb {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+}
+.blurb li { margin: 3px 0; }
+
+.progress { margin-top: 22px; color: var(--muted); font-size: 13px; }
+.bar {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--panel-2);
+    overflow: hidden;
+    margin-bottom: 7px;
+}
+.fill { height: 100%; background: var(--accent); transition: width 0.1s linear; }
+
+.notice { margin: 16px 0 0; color: var(--warn); font-size: 13px; }
+
+/* ---------- viewer ---------- */
+
+.viewer { flex: 1; display: flex; min-height: 0; }
+
+.sidebar {
+    width: 244px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    overflow: hidden;
+}
+
+.patient { padding: 14px 14px 12px; border-bottom: 1px solid var(--line); }
+.pname { font-weight: 600; }
+.pmeta { color: var(--muted); font-size: 12.5px; }
+
+.series-head {
+    padding: 10px 14px 6px;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.series-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+
+.series {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 9px 11px;
+    margin-bottom: 4px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+.series:hover { background: var(--panel-2); }
+.series.active { background: var(--panel-2); border-color: var(--accent); }
+.s-label { display: block; font-size: 13px; }
+.s-meta { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+.s-warn { display: block; color: var(--warn); font-size: 11.5px; margin-top: 4px; }
+
+.stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    flex-wrap: wrap;
+}
+
+.tool {
+    padding: 5px 11px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.tool:hover { background: var(--panel-2); }
+.tool.active { border-color: var(--accent); color: var(--accent); }
+
+.sep { width: 1px; height: 20px; background: var(--line); margin: 0 5px; }
+.spacer { flex: 1; }
+.readout { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+.warnbar {
+    padding: 7px 14px;
+    background: rgba(255, 180, 84, 0.1);
+    border-bottom: 1px solid var(--line);
+    color: var(--warn);
+    font-size: 12.5px;
+}
+
+.stage-canvas {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #000;
+    cursor: crosshair;
+    /* The gestures are custom; never let the browser select or scroll. */
+    user-select: none;
+    touch-action: none;
+}
+.stage-canvas.panning { cursor: grab; }
+
+.stage-canvas canvas {
+    /* Fit the slice to the pane, then let zoom/pan ride on top as a
+       transform so no repaint is needed while dragging. */
+    max-width: 100%;
+    max-height: 100%;
+    image-rendering: pixelated;
+    transform-origin: center center;
+}
+
+.overlay {
+    position: absolute;
+    padding: 8px 12px;
+    color: rgba(255, 255, 255, 0.72);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    pointer-events: none;
+    text-shadow: 0 1px 3px #000;
+}
+.tl { top: 0; left: 0; }
+.tr { top: 0; right: 0; text-align: right; }
+.bl { bottom: 0; left: 0; }
+.br { bottom: 0; right: 0; text-align: right; }
+
+.statusbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    font-size: 12.5px;
+    color: var(--muted);
+}
+.statusbar > span:first-child { font-family: var(--mono); color: var(--text); }
+.scrub { flex: 1; accent-color: var(--accent); }
+.hint { font-size: 11.5px; }
+
+@media (max-width: 720px) {
+    .sidebar { width: 170px; }
+    .hint, .tag { display: none; }
+}

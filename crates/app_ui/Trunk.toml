@@ -1,0 +1,5 @@
+# XelRay is served from a sub-path of xelth.com. Override for a different
+# mount point with `trunk build --public-url /`.
+[build]
+public_url = "/M/xelray/"
+release = false
