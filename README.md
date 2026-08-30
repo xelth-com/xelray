@@ -101,6 +101,10 @@ transfer syntaxes decode. JPEG 2000 and JPEG XL do not: their decoders in
 dicom-rs are C libraries that do not build for `wasm32-unknown-unknown`. Those
 series are flagged in the UI rather than failing silently.
 
+Multi-frame instances currently show their first frame only; the stack is
+built from single-frame instances, which is what CT and MR studies on a
+hospital CD look like.
+
 ## Privacy
 
 There is no server component in this repository, and the app makes no network
