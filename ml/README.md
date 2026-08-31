@@ -31,6 +31,7 @@ to use the high-res one instead.
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 .\.venv\Scripts\python.exe -m pip install "monai[nibabel]" SimpleITK matplotlib tqdm fire requests
+.\.venv\Scripts\python.exe -m pip install scikit-image plotly          # for render3d.py
 .\.venv\Scripts\python.exe -m monai.bundle download --name wholeBody_ct_segmentation --bundle_dir bundle
 ```
 
@@ -54,6 +55,35 @@ Three separately cached stages, so a long run can be resumed with `--stage`:
 | `post`  | nearest-neighbour resample back to the original CT grid, per-organ volumes, overlay PNGs | `pred_orig_space.nii.gz`, `volumes.json`, `overlay_*.png`, `zoom_*.png` |
 
 Wall-clock for each stage lands in `out/timings.json`.
+
+Overlays are rendered once per language listed in `--langs` (default `en,ru`). English
+keeps the bare filenames; every other language gets a `_<lang>` suffix.
+
+## 3D view
+
+```powershell
+.\.venv\Scripts\python.exe render3d.py --out out
+```
+
+Writes `out/render3d.html`: one self-contained page (plotly.js embedded, ~9 MB) with
+orbit/zoom, per-organ legend toggles, and a language picker. Meshes come from marching
+cubes on the 3 mm label map with a light gaussian pre-smooth — 40x fewer voxels than the
+original grid and visually indistinguishable at this zoom. `--space orig` uses the full
+resolution instead.
+
+The left kidney is drawn translucent so the tumour-region mesh inside it stays visible.
+That region is *estimated*, not predicted by the model: the bundle has no lesion class, so
+`tumour_mask()` takes the inferior part of the `kidney_left` label, keeps voxels below
+`--tumour-hu` (default 150 HU, versus ~170 HU for normal portal-venous cortex) and returns
+the largest connected component. Pass `--no-tumour` to leave it out.
+
+### Languages
+
+English is embedded, so the page renders fully offline. Picking any other language fetches
+`https://xelth.com/i18n/{lang}`, keeps the `xelray.organ.*` keys, and caches them in
+`localStorage` — so after one online view that language also works offline. If the fetch
+fails the current language is kept and a small note appears. Nothing else in the page
+touches the network: the meshes, plotly and all computation are local.
 
 ## Notes / deviations from the bundle reference pipeline
 

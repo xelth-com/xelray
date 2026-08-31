@@ -75,6 +75,34 @@ COLORS = {
     "urinary_bladder": (0.60, 0.60, 0.60),
 }
 
+# Display names per UI language. Overlays are rendered once per language; the
+# Russian set is what the radiologist-facing views use.
+NAMES = {
+    "en": {k: k for k in ORGANS},
+    "ru": {
+        "spleen": "селезёнка",
+        "kidney_right": "правая почка",
+        "kidney_left": "левая почка",
+        "gallbladder": "жёлчный пузырь",
+        "liver": "печень",
+        "aorta": "аорта",
+        "pancreas": "поджелудочная железа",
+        "adrenal_gland_right": "правый надпочечник",
+        "adrenal_gland_left": "левый надпочечник",
+        "urinary_bladder": "мочевой пузырь",
+    },
+}
+
+TITLES = {
+    "en": "axial slice z={z}  (soft tissue W{ww}/L{wl})  patient LEFT = image right",
+    "ru": (
+        "аксиальный срез z={z}"
+        "  (мягкотканное окно"
+        " W{ww}/L{wl})  ЛЕВАЯ сторона"
+        " пациента — справа"
+    ),
+}
+
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -324,13 +352,10 @@ def stage_post(args, out: Path) -> dict:
         z = int(liver_z[len(liver_z) // 2])
         picks.append((f"liver_mid_z{z:04d}", z))
 
-    paths = []
-    for tag, z in picks:
-        p = render_overlay(ct_np, lab_np, z, png_dir / f"overlay_{tag}.png", plt, mpatches)
-        paths.append(str(p))
-
     # Zoomed views of the left renal fossa, sampled below and through the left kidney
     # label -- this is where a lower-pole mass shows up as a defect in the mask.
+    box = None
+    zooms: list[int] = []
     lk = lab_np == ORGANS["kidney_left"]
     if lk.any():
         lz, ly, lx = np.nonzero(lk)
@@ -341,30 +366,45 @@ def stage_post(args, out: Path) -> dict:
             min(lab_np.shape[2], lx.max() + 60),
         )
         span = lz.max() - lz.min()
-        zs = np.unique(
-            np.clip(
-                np.linspace(lz.min() - 0.45 * span, lz.max(), 6).round().astype(int),
-                0,
-                lab_np.shape[0] - 1,
+        zooms = [
+            int(z)
+            for z in np.unique(
+                np.clip(
+                    np.linspace(lz.min() - 0.45 * span, lz.max(), 6).round().astype(int),
+                    0,
+                    lab_np.shape[0] - 1,
+                )
             )
-        )
-        for z in zs:
+        ]
+
+    # English keeps the original filenames; Russian gets a _ru suffix.
+    paths = []
+    for lang in args.langs.split(","):
+        sfx = "" if lang == "en" else f"_{lang}"
+        for tag, z in picks:
             p = render_overlay(
-                ct_np, lab_np, int(z), png_dir / f"zoom_leftkidney_z{int(z):04d}.png",
-                plt, mpatches, crop=box,
+                ct_np, lab_np, z, png_dir / f"overlay_{tag}{sfx}.png", plt, mpatches, lang=lang
             )
             paths.append(str(p))
-    log(f"wrote {len(paths)} overlay PNGs")
+        for z in zooms:
+            p = render_overlay(
+                ct_np, lab_np, z, png_dir / f"zoom_leftkidney_z{z:04d}{sfx}.png",
+                plt, mpatches, crop=box, lang=lang,
+            )
+            paths.append(str(p))
+    log(f"wrote {len(paths)} overlay PNGs ({args.langs})")
     payload["overlays"] = paths
     (out / "volumes.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return {"overlays": paths, "volumes": volumes, "payload": payload}
 
 
-def render_overlay(ct_np, lab_np, z, path, plt, mpatches, wl=50, ww=400, crop=None):
+def render_overlay(ct_np, lab_np, z, path, plt, mpatches, wl=50, ww=400, crop=None, lang="en"):
     """Axial CT slice in a soft-tissue window with semi-transparent organ masks.
 
     `crop` is an optional (y0, y1, x0, x1) index box for a zoomed view.
+    `lang` selects the legend/title language ("en" or "ru").
     """
+    names = NAMES[lang]
     if crop is not None:
         y0, y1, x0, x1 = crop
         ct_np = ct_np[:, y0:y1, x0:x1]
@@ -382,14 +422,14 @@ def render_overlay(ct_np, lab_np, z, path, plt, mpatches, wl=50, ww=400, crop=No
             continue
         c = np.array(COLORS[name], dtype=np.float32)
         rgb[m] = 0.55 * rgb[m] + 0.45 * c
-        handles.append(mpatches.Patch(color=c, label=f"{name} ({int(m.sum())} px)"))
+        handles.append(mpatches.Patch(color=c, label=f"{names[name]} ({int(m.sum())} px)"))
 
     fig, ax = plt.subplots(figsize=(8.5, 7.0), dpi=130)
     # Array axes are (z, y, x) in LPS: +y = posterior, +x = patient-left. matplotlib's
     # default origin="upper" therefore gives the radiological view (anterior up, patient
     # left on the image right).
     ax.imshow(rgb)
-    ax.set_title(f"axial slice z={z}  (soft tissue W{ww}/L{wl})  patient LEFT = image right")
+    ax.set_title(TITLES[lang].format(z=z, ww=ww, wl=wl))
     ax.axis("off")
     if handles:
         ax.legend(handles=handles, loc="upper left", fontsize=7, framealpha=0.85)
@@ -411,6 +451,9 @@ def main() -> None:
     ap.add_argument("--overlap", type=float, default=0.5)
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--stage", default="all", choices=["all", "prep", "infer", "post"])
+    ap.add_argument(
+        "--langs", default="en,ru", help="comma-separated overlay languages; 'en' keeps bare names"
+    )
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
 
