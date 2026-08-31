@@ -98,7 +98,12 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
     // Two-finger touch: pinch distance and centroid Y at the last move.
     let pinch = store_value::<Option<(f64, f64, f64)>>(None);
 
-    let _ = window_event_listener(ev::mousemove, move |ev| {
+    // These live on `window` so a drag keeps working when the pointer leaves
+    // the image — but they therefore outlive this component unless removed.
+    // Dropping the handle does *not* unregister them: closing a study would
+    // leave them firing against disposed signals, which aborts the module on
+    // the next mouse move. Hence the explicit cleanup below.
+    let on_move = window_event_listener(ev::mousemove, move |ev| {
         let Some((kind, last_x, last_y)) = drag.get_untracked() else {
             return;
         };
@@ -119,7 +124,12 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
         }
     });
 
-    let _ = window_event_listener(ev::mouseup, move |_| drag.set(None));
+    let on_up = window_event_listener(ev::mouseup, move |_| drag.set(None));
+
+    on_cleanup(move || {
+        on_move.remove();
+        on_up.remove();
+    });
 
     let on_mousedown = move |ev: ev::MouseEvent| {
         let kind = match ev.button() {
@@ -150,6 +160,9 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
             });
             return;
         }
+
+        // Any manual step through the stack stops cine playback.
+        v.pause_cine();
 
         if delta.abs() >= NOTCH_THRESHOLD {
             // A real mouse wheel: one detent, one slice, no carry-over —
@@ -212,6 +225,7 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
                     acc - steps * TOUCH_PIXELS_PER_SLICE,
                 )));
                 if steps != 0.0 {
+                    v.pause_cine();
                     v.step_slice(steps as i32);
                 }
             } else {
@@ -240,6 +254,7 @@ pub fn Stage(v: Viewer, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
         let steps = (acc / TOUCH_PIXELS_PER_SLICE).trunc();
         touch.set_value(Some((x, y, acc - steps * TOUCH_PIXELS_PER_SLICE)));
         if steps != 0.0 {
+            v.pause_cine();
             v.step_slice(steps as i32);
         }
     };

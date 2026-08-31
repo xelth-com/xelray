@@ -557,6 +557,51 @@ fn format_date(raw: &str) -> String {
     }
 }
 
+/// How far ahead to decode while stepping at a normal pace.
+pub const PREFETCH_AHEAD: usize = 6;
+/// How far behind, to keep a change of mind cheap.
+pub const PREFETCH_BEHIND: usize = 2;
+/// Ahead-window while scrolling fast, where running out of runway is the
+/// only thing that shows.
+pub const PREFETCH_AHEAD_FAST: usize = 10;
+/// Behind-window while scrolling fast. Reversing mid-flight is rare enough
+/// that the budget is better spent forwards.
+pub const PREFETCH_BEHIND_FAST: usize = 1;
+
+/// Which images to decode ahead of time, in the order worth doing them.
+///
+/// A symmetric window spends half its budget behind the cursor, which is
+/// exactly the half already sitting in the cache from having just been
+/// looked at. Weighting the window towards travel buys real runway for the
+/// same number of decodes.
+///
+/// `direction` is `+1` or `-1`; `0` is treated as forward. The returned
+/// indices exclude `current` and are ordered nearest-first in the direction
+/// of travel, then nearest-first behind — so the caller can simply issue
+/// them in order and let the first ones win the race.
+pub fn prefetch_order(current: usize, count: usize, direction: i32, fast: bool) -> Vec<usize> {
+    if count == 0 || current >= count {
+        return Vec::new();
+    }
+    let forward = direction >= 0;
+    let (ahead, behind) = if fast {
+        (PREFETCH_AHEAD_FAST, PREFETCH_BEHIND_FAST)
+    } else {
+        (PREFETCH_AHEAD, PREFETCH_BEHIND)
+    };
+
+    let step = |n: usize, towards_travel: bool| -> Option<usize> {
+        let delta = n as i64 * if forward == towards_travel { 1 } else { -1 };
+        let target = current as i64 + delta;
+        (target >= 0 && target < count as i64).then_some(target as usize)
+    };
+
+    let mut out = Vec::with_capacity(ahead + behind);
+    out.extend((1..=ahead).filter_map(|n| step(n, true)));
+    out.extend((1..=behind).filter_map(|n| step(n, false)));
+    out
+}
+
 /// The window/level presets offered in the toolbar, as `(name, width, center)`.
 pub const WINDOW_PRESETS: &[(&str, f64, f64)] = &[
     ("Soft tissue", 400.0, 40.0),

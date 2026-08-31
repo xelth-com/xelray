@@ -24,13 +24,35 @@
 
     --text:     #cdbfa6;  /* xelth.com body cream */
     --bright:   #ead8c1;  /* xelth.com heading cream — emphasis only */
-    --muted:    #8f8168;
-    --faint:    #6b6252;  /* key hints, the dimmest thing on screen */
+    /* Both checked against --panel: 5.6:1 and 5.0:1. The dimmer greys this
+       replaced measured 4.3:1, which is under the readable floor and was
+       exactly the "too thin to read" complaint. */
+    --muted:    #a09580;
+    --faint:    #998d75;
 
     --accent:       #d9b36a;  /* xelth.com gold */
     --accent-hi:    #f5c451;  /* its brighter sibling, for hover */
     --warn:         #e0836f;  /* xelth.com's soft terracotta */
 
+    /* --- functional hues -------------------------------------------------
+       One hue per family of controls, so position is not the only thing
+       telling them apart. Used on dots, borders and hover states only —
+       never as a filled surface, which would turn the rail into a toybox
+       and compete with the image. Red is deliberately absent: beside a
+       medical image it reads as a finding, not a button. */
+    --nav:      #d9b36a;  /* moving through the stack — the house gold */
+    --zoom:     #7fb3c8;  /* size: a cool sky, opposite the warm base */
+    --zoom-in:  #9ccbdd;  /* larger — lighter of the same hue */
+    --zoom-out: #6a95a8;  /* smaller — darker of the same hue */
+
+    /* Window presets, each tinted the way its tissue reads. */
+    --w-soft:  #e2cdae;  /* soft tissue — cream */
+    --w-lung:  #9fb6c4;  /* lung — cool blue-grey, like air */
+    --w-bone:  #f0e6d2;  /* bone — warm ivory */
+    --w-brain: #b6a6cc;  /* brain — muted violet */
+
+    /* Wide enough for two 14px labels side by side without clipping. */
+    --rail:     228px;
     --radius:   7px;
     /* Cascadia Mono is xelth.com's signature face. Used here for the
        wordmark, labels and readouts; prose stays in the system UI face,
@@ -49,7 +71,10 @@ html, body {
     overflow: hidden;
     background: var(--bg);
     color: var(--text);
-    font: 13px/1.5 var(--sans);
+    /* 15px base. The previous 13px was a developer's habit; this is read
+       at arm's length, sometimes by someone who needs reading glasses. */
+    font: 15px/1.55 var(--sans);
+    font-weight: 450;
     -webkit-font-smoothing: antialiased;
 }
 
@@ -77,8 +102,8 @@ a:hover { text-decoration: underline; }
     color: var(--bright);
 }
 .logo::first-letter { color: var(--accent); }
-.logo.big { font-size: 27px; }
-.tag { color: var(--muted); font-size: 12.5px; }
+.logo.big { font-size: 30px; }
+.tag { color: var(--muted); font-size: 15px; }
 
 /* ---------- landing ---------- */
 
@@ -110,9 +135,15 @@ a:hover { text-decoration: underline; }
     background: var(--panel);
 }
 
-.dz-icon { font-size: 38px; color: var(--accent); line-height: 1; }
-.dropzone h1 { margin: 14px 0 6px; font-size: 21px; font-weight: 600; }
-.dz-sub { margin: 0; color: var(--muted); }
+.dz-icon { font-size: 42px; color: var(--accent); line-height: 1; }
+.dropzone h1 {
+    margin: 16px 0 8px;
+    font-size: 27px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--bright);
+}
+.dz-sub { margin: 0; font-size: 16px; color: var(--text); }
 .dz-sub code {
     font-family: var(--mono);
     background: var(--panel-2);
@@ -122,13 +153,21 @@ a:hover { text-decoration: underline; }
 
 .dz-buttons { display: flex; gap: 12px; justify-content: center; margin-top: 22px; }
 
+/* Shared by the folder button and the file-input labels, which have to be
+   indistinguishable — `font` and `line-height` are reset because a real
+   <button> otherwise takes the OS font while a <label> inherits the page's. */
 .btn {
     display: inline-block;
-    padding: 9px 18px;
+    padding: 12px 26px;
     border-radius: var(--radius);
     background: var(--accent);
     color: #0b1a14;
+    /* `font: inherit` first — it is shorthand, so it would otherwise wipe
+       out the size and weight set beside it. */
+    font: inherit;
+    font-size: 16px;
     font-weight: 600;
+    line-height: 1.5;
     cursor: pointer;
     border: 1px solid transparent;
 }
@@ -138,10 +177,23 @@ a:hover { text-decoration: underline; }
 /* The real input stays in the DOM (labels need it) but never shows. */
 .btn input[type="file"] { display: none; }
 
-.privacy { margin: 0; color: var(--muted); }
-.landing-links { margin: 0; color: var(--muted); font-size: 12.5px; }
+.privacy {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 10px 18px 10px 14px;
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    background: rgba(217, 179, 106, 0.07);
+    color: var(--bright);
+    font-size: 15px;
+    font-weight: 500;
+}
+.lock { font-size: 17px; line-height: 1; }
+.landing-links { margin: 0; color: var(--muted); font-size: 14px; }
 
-.progress { margin-top: 22px; color: var(--muted); font-size: 12.5px; }
+.progress { margin-top: 22px; color: var(--text); font-size: 14px; }
 .bar {
     height: 5px;
     border-radius: 3px;
@@ -151,13 +203,14 @@ a:hover { text-decoration: underline; }
 }
 .fill { height: 100%; background: var(--accent); transition: width 0.1s linear; }
 
-.notice { margin: 16px 0 0; color: var(--warn); font-size: 12.5px; }
+.notice { margin: 16px 0 0; color: var(--warn); font-size: 14px; font-weight: 500; }
 
 /* ---------- viewer: rail + stage ---------- */
 
 .viewer { flex: 1; display: flex; min-height: 0; position: relative; }
 
 .rail {
+    font-size: 14px;
     width: var(--rail);
     flex: none;
     display: flex;
@@ -172,7 +225,7 @@ a:hover { text-decoration: underline; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 9px 8px 9px 12px;
+    padding: 7px 8px 7px 12px;
     border-bottom: 1px solid var(--line);
 }
 
@@ -222,7 +275,7 @@ a:hover { text-decoration: underline; }
     scrollbar-color: rgba(234, 216, 193, 0.15) transparent;
 }
 
-.rail-sec { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.rail-sec { padding: 6px 0; border-bottom: 1px solid var(--line); }
 .rail-sec:last-child { border-bottom: none; }
 
 .rail-head {
@@ -230,17 +283,18 @@ a:hover { text-decoration: underline; }
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    padding: 0 3px 6px;
+    padding: 0 3px 5px;
     color: var(--muted);
-    font-size: 10px;
-    letter-spacing: 0.09em;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
 }
 
 /* Inline reminder of the key that drives each section. */
 .kbd-hint {
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11.5px;
     letter-spacing: 0;
     text-transform: none;
     color: var(--faint);
@@ -250,7 +304,7 @@ a:hover { text-decoration: underline; }
     display: block;
     width: 100%;
     text-align: left;
-    padding: 7px 9px;
+    padding: 6px 9px;
     margin-bottom: 3px;
     border: 1px solid transparent;
     border-radius: var(--radius);
@@ -267,24 +321,33 @@ a:hover { text-decoration: underline; }
 }
 .s-label {
     display: block;
-    font-size: 12px;
-    line-height: 1.35;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
     overflow-wrap: anywhere;
 }
-.s-meta { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
-.s-warn { display: block; color: var(--warn); font-size: 11px; margin-top: 3px; }
+.s-meta { display: block; color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+.s-warn {
+    display: block;
+    color: var(--warn);
+    font-size: 12.5px;
+    font-weight: 500;
+    margin-top: 4px;
+}
 
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
 
 .tool {
-    font-family: var(--mono);
-    padding: 5px 6px;
+    /* Labels are words, not data: the system face reads better at this size
+       than the mono one, which is kept here for numbers and keys only. */
+    padding: 6px 8px;
     border: 1px solid var(--line);
     border-radius: 6px;
     background: transparent;
     color: var(--text);
     font: inherit;
-    font-size: 11.5px;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
@@ -299,28 +362,97 @@ a:hover { text-decoration: underline; }
     justify-content: space-between;
     gap: 6px;
     width: 100%;
-    margin-top: 4px;
+    margin-top: 3px;
 }
 
 .readout {
-    margin-top: 6px;
+    margin-top: 5px;
     padding: 0 3px;
-    color: var(--muted);
+    color: var(--text);
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 13px;
 }
 
-.scrub { width: 100%; margin-top: 6px; accent-color: var(--accent); }
+.scrub { width: 100%; margin-top: 6px; accent-color: var(--nav); }
 
-.rail-foot { padding: 8px; border-top: 1px solid var(--line); }
+/* ---------- functional colour ----------
+   Each family of controls carries its own hue, so a glance tells brightness
+   from size without reading. The dose is deliberately small: a dot, a
+   border, a hover — never a filled button. The rail has to stay quieter
+   than the image next to it. */
+
+/* A dot before each section heading, coloured by what the section does. */
+.rail-head::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    margin-right: 7px;
+    border-radius: 50%;
+    background: var(--dot, var(--muted));
+    flex: none;
+    align-self: center;
+}
+.rail-head { align-items: center; }
+.rail-head.nav    { --dot: var(--nav); }
+.rail-head.window { --dot: var(--w-soft); }
+.rail-head.view   { --dot: var(--zoom); }
+
+/* A coloured chip on the leading edge, worn as a label rather than a fill.
+   Every control that belongs to a family carries one, so the family is
+   legible at rest and not only under the cursor. */
+.chip {
+    position: relative;
+    padding-left: 18px;
+    text-align: left;
+}
+.chip::before {
+    content: "";
+    position: absolute;
+    left: 7px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    margin-top: -3px;
+    border-radius: 50%;
+    background: var(--chip);
+}
+.chip:hover { border-color: var(--chip); }
+
+/* Window presets, tinted the way each tissue reads. */
+.preset-soft  { --chip: var(--w-soft); }
+.preset-lung  { --chip: var(--w-lung); }
+.preset-bone  { --chip: var(--w-bone); }
+.preset-brain { --chip: var(--w-brain); }
+/* Selected still reads as gold, so "which one is on" never changes meaning
+   between sections. */
+.preset.active { border-color: var(--accent); color: var(--accent); }
+
+/* Size controls take the cool hue: lighter for bigger, darker for smaller,
+   so the direction is carried by the colour as well as the word. */
+.zoom-in  { --chip: var(--zoom-in); }
+.zoom-out { --chip: var(--zoom-out); }
+.fit      { --chip: var(--zoom); }
+.zoom-in:hover, .zoom-out:hover, .fit:hover { color: var(--chip); }
+
+/* Playback is navigation, so it wears the navigation gold. */
+.cine { --chip: var(--nav); }
+.cine.active { border-color: var(--accent); color: var(--accent); }
+
+/* The same hues label the help sheet, so the cheat sheet teaches the
+   colour system as well as the keys. */
+.hk-group.images, .hk-group.series { color: var(--nav); }
+.hk-group.window { color: var(--w-soft); }
+.hk-group.view { color: var(--zoom); }
+
+.rail-foot { padding: 7px 8px; border-top: 1px solid var(--line); }
 .rail-links {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    margin-top: 8px;
+    margin-top: 7px;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 12.5px;
 }
 
 /* The language picker sits in the link row and is dressed as one of the
@@ -332,7 +464,7 @@ a:hover { text-decoration: underline; }
     background: transparent;
     color: var(--muted);
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 12.5px;
     cursor: pointer;
 }
 .lang:hover { color: var(--accent); }
@@ -377,10 +509,10 @@ a:hover { text-decoration: underline; }
     pointer-events: none;
 }
 .stage-message.error { border-color: rgba(224, 131, 111, 0.45); }
-.sm-title { color: var(--warn); font-weight: 600; margin-bottom: 6px; }
+.sm-title { color: var(--warn); font-size: 16px; font-weight: 600; margin-bottom: 8px; }
 .sm-body {
-    color: var(--muted);
-    font-size: 12px;
+    color: var(--text);
+    font-size: 13.5px;
     overflow-wrap: anywhere;
     margin-top: 3px;
 }
@@ -393,8 +525,8 @@ a:hover { text-decoration: underline; }
     padding: 4px 12px;
     border-radius: 999px;
     background: rgba(0, 36, 28, 0.82);
-    color: var(--muted);
-    font-size: 11.5px;
+    color: var(--text);
+    font-size: 13px;
     pointer-events: none;
 }
 
@@ -413,7 +545,7 @@ a:hover { text-decoration: underline; }
     max-width: 45%;
     color: rgba(234, 216, 193, 0.62);
     font-family: var(--mono);
-    font-size: 11.5px;
+    font-size: 12.5px;
     pointer-events: none;
     text-shadow: 0 1px 3px #000;
     overflow-wrap: anywhere;
@@ -429,7 +561,9 @@ a:hover { text-decoration: underline; }
     top: 0;
     left: 0;
     right: 0;
-    padding: 6px 14px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
     background: rgba(224, 131, 111, 0.13);
     border-bottom: 1px solid rgba(224, 131, 111, 0.3);
     color: var(--warn);
@@ -465,9 +599,11 @@ a:hover { text-decoration: underline; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 12px 12px 18px;
+    padding: 14px 12px 14px 18px;
     border-bottom: 1px solid var(--line);
+    font-size: 16px;
     font-weight: 600;
+    color: var(--bright);
 }
 
 .help-grid {
@@ -480,14 +616,15 @@ a:hover { text-decoration: underline; }
 
 .hk-group {
     color: var(--muted);
-    font-size: 10px;
-    letter-spacing: 0.09em;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     /* Empty cells continue the group above; they still hold the column. */
     min-width: 48px;
 }
 .hk-keys { display: flex; flex-wrap: wrap; gap: 4px; }
-.hk-what { color: var(--muted); font-size: 12px; }
+.hk-what { color: var(--text); font-size: 14px; }
 
 kbd {
     display: inline-block;
@@ -498,16 +635,18 @@ kbd {
     background: var(--panel-2);
     color: var(--text);
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 12.5px;
+    font-weight: 600;
     line-height: 1.5;
     white-space: nowrap;
 }
 
 .help-foot {
-    padding: 12px 18px 16px;
+    padding: 14px 18px 18px;
     border-top: 1px solid var(--line);
     color: var(--muted);
-    font-size: 11.5px;
+    font-size: 13px;
+    line-height: 1.5;
 }
 .help-foot p { margin: 0 0 6px; }
 .help-foot p:last-child { margin-bottom: 0; }

@@ -23,6 +23,7 @@ pub const HELP: &[(&str, &str, &str)] = &[
     ("xelray.help.group.images", "↑ ↓", "xelray.help.step"),
     ("", "Shift+↑ Shift+↓", "xelray.help.jump"),
     ("", "g G", "xelray.help.ends"),
+    ("", "Space", "xelray.help.cine"),
     ("xelray.help.group.series", "← →", "xelray.help.series"),
     ("", "[ ]", "xelray.help.series_alt"),
     ("xelray.help.group.window", "1 2 3 4", "xelray.help.presets"),
@@ -36,6 +37,11 @@ pub const HELP: &[(&str, &str, &str)] = &[
 
 /// Install the window-level key handler.
 pub fn install(v: Viewer) {
+    // Deliberately never removed. This is installed once by the root
+    // component and only ever touches signals the root owns, so it cannot
+    // outlive them the way a listener registered inside a child component
+    // would — those must be cleaned up, or they fire against disposed
+    // signals and abort the module.
     let _ = window_event_listener(ev::keydown, move |ev| {
         // Never fight the browser's own chords (copy, reload, zoom…).
         if ev.ctrl_key() || ev.meta_key() || ev.alt_key() {
@@ -70,8 +76,25 @@ pub fn install(v: Viewer) {
             return;
         }
 
+        // Space is the one navigation key that starts motion rather than
+        // interrupting it.
+        if key == " " || key == "Spacebar" {
+            v.toggle_cine();
+            ev.prevent_default();
+            return;
+        }
+
         let fast = ev.shift_key();
         let step = if fast { FAST_STEP } else { 1 };
+
+        // Taking the wheel stops playback; it only ever resumes on Space.
+        if matches!(
+            key.as_str(),
+            "ArrowUp" | "ArrowDown" | "PageUp" | "PageDown" | "g" | "G" | "Home" | "End"
+                | "ArrowLeft" | "ArrowRight" | "[" | "]"
+        ) {
+            v.pause_cine();
+        }
 
         match key.as_str() {
             // ---- images -------------------------------------------------
@@ -79,7 +102,7 @@ pub fn install(v: Viewer) {
             "ArrowDown" | "PageDown" => v.step_slice(step),
             // `g` / `G` because Home and End need Fn on most laptops.
             "g" | "Home" => v.slice_idx.set(0),
-            "G" | "End" => v.slice_idx.set(v.slice_count().saturating_sub(1)),
+            "G" | "End" => v.slice_idx.set(v.last_index()),
 
             // ---- series -------------------------------------------------
             "ArrowLeft" | "[" => v.step_series(-1),

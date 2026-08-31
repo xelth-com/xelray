@@ -25,6 +25,9 @@ mod viewport;
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::time::Duration;
+
+use leptos::leptos_dom::helpers::IntervalHandle;
 
 use leptos::html::Canvas;
 use leptos::*;
@@ -37,21 +40,24 @@ const REPO_URL: &str = "https://github.com/xelth-com/xelray";
 /// How far `Shift` + a step key jumps.
 const FAST_STEP: i32 = 10;
 
-/// How many images either side of the current one to decode ahead of time.
-///
-/// Three is enough to cover a comfortable scroll without the prefetch itself
-/// becoming the thing that thrashes the cache.
-const PREFETCH_RADIUS: i32 = 3;
+/// Steps closer together than this mean the user is scrolling, not reading,
+/// and the prefetch window widens. Generous on purpose: a wider window costs
+/// a few extra reads, while too narrow a one costs a visible stutter.
+const FAST_STEP_MS: f64 = 250.0;
 
-/// Translation keys for [`WINDOW_PRESETS`], in the same order.
+/// Cine playback rate. Fast enough to read anatomy as continuous motion,
+/// slow enough that a disc-backed decode can usually keep up.
+const CINE_FPS: f64 = 15.0;
+
+/// Translation key and tint class for each of [`WINDOW_PRESETS`], in order.
 ///
 /// The preset names live in the translation table rather than in the core
 /// crate, which has no business knowing what language anyone reads.
-const PRESET_KEYS: &[&str] = &[
-    "xelray.preset.soft",
-    "xelray.preset.lung",
-    "xelray.preset.bone",
-    "xelray.preset.brain",
+const PRESET_KEYS: &[(&str, &str)] = &[
+    ("xelray.preset.soft", "preset-soft"),
+    ("xelray.preset.lung", "preset-lung"),
+    ("xelray.preset.bone", "preset-bone"),
+    ("xelray.preset.brain", "preset-brain"),
 ];
 
 /// Every piece of viewer state, bundled so the sub-views can take one prop.
@@ -81,6 +87,14 @@ pub struct Viewer {
     /// Reused RGBA scratch buffer. Allocating a megabyte per repaint would
     /// otherwise churn the heap on every window/level drag.
     rgba: StoredValue<Vec<u8>>,
+    /// Which way the user is travelling through the stack, `+1` or `-1`.
+    /// The prefetch window points this way and flips the instant it does.
+    direction: StoredValue<i32>,
+    /// Where we were, and when, so the next step can measure its own pace.
+    last_idx: StoredValue<usize>,
+    last_step_at: StoredValue<f64>,
+    /// Ticker for cine playback; `None` when stopped.
+    cine: StoredValue<Option<IntervalHandle>>,
 
     /// `(files indexed, files total)` while a load is in flight.
     pub progress: RwSignal<Option<(usize, usize)>>,
@@ -102,6 +116,8 @@ pub struct Viewer {
     /// Corner text over the image.
     pub overlays: RwSignal<bool>,
     pub help: RwSignal<bool>,
+    /// Cine playback is running.
+    pub playing: RwSignal<bool>,
     pub notice: RwSignal<Option<String>>,
     pub drag_over: RwSignal<bool>,
 }
@@ -123,6 +139,10 @@ impl Viewer {
             pending: store_value(None),
             generation: store_value(0),
             rgba: store_value(Vec::new()),
+            direction: store_value(1),
+            last_idx: store_value(0),
+            last_step_at: store_value(0.0),
+            cine: store_value(None),
 
             progress: create_rw_signal(None),
             series_idx: create_rw_signal(0),
@@ -137,6 +157,7 @@ impl Viewer {
             rail: create_rw_signal(true),
             overlays: create_rw_signal(true),
             help: create_rw_signal(false),
+            playing: create_rw_signal(false),
             notice: create_rw_signal(None),
             drag_over: create_rw_signal(false),
         }
@@ -166,6 +187,32 @@ impl Viewer {
         self.study.with(|s| s.as_ref().map_or(0, |st| st.series.len()))
     }
 
+    /// [`Self::slice_count`] for callers that are not views.
+    ///
+    /// Key handlers, click handlers and the cine ticker all run outside any
+    /// reactive context, where a tracked read subscribes nothing and merely
+    /// earns a warning. Spelling the intent out separately keeps the tracked
+    /// version honest for the views that do depend on it.
+    fn slice_count_untracked(&self) -> usize {
+        self.study
+            .with_untracked(|s| {
+                s.as_ref()
+                    .and_then(|st| st.series.get(self.series_idx.get_untracked()))
+                    .map(|se| se.len())
+            })
+            .unwrap_or(0)
+    }
+
+    /// Index of the last image, for the "jump to end" bindings.
+    pub fn last_index(&self) -> usize {
+        self.slice_count_untracked().saturating_sub(1)
+    }
+
+    fn series_count_untracked(&self) -> usize {
+        self.study
+            .with_untracked(|s| s.as_ref().map_or(0, |st| st.series.len()))
+    }
+
     /// True once the image is magnified past its fitted size, which is when a
     /// left-drag becomes a pan instead of a window/level adjustment.
     pub fn is_zoomed(&self) -> bool {
@@ -174,7 +221,7 @@ impl Viewer {
 
     /// Move `delta` slices, clamped to the series.
     pub fn step_slice(&self, delta: i32) {
-        let count = self.slice_count();
+        let count = self.slice_count_untracked();
         if count == 0 {
             return;
         }
@@ -184,7 +231,7 @@ impl Viewer {
 
     /// Move `delta` series, clamped.
     pub fn step_series(&self, delta: i32) {
-        let count = self.series_count();
+        let count = self.series_count_untracked();
         if count == 0 {
             return;
         }
@@ -219,8 +266,9 @@ impl Viewer {
 
     /// Pick a series and re-derive everything that depends on it.
     pub fn select_series(&self, idx: usize) {
+        self.stop_cine();
         self.series_idx.set(idx);
-        let count = self.slice_count();
+        let count = self.slice_count_untracked();
         // Opening in the middle of the stack is far more useful than the
         // first slice, which on a CT is usually empty air.
         self.slice_idx.set(count / 2);
@@ -360,7 +408,9 @@ impl Viewer {
     /// ready.
     fn show_current(&self) {
         let this = *self;
-        let Some((id, file_index)) = self.locate(self.slice_idx.get()) else {
+        let here = self.slice_idx.get();
+        let fast = self.track_motion(here);
+        let Some((id, file_index)) = self.locate(here) else {
             self.decoded.set(None);
             self.pending.set_value(None);
             return;
@@ -386,21 +436,101 @@ impl Viewer {
             fetch(this, id, file_index, None);
         }
 
-        // Warm the neighbours in both directions so a scroll stays smooth.
-        let count = self.slice_count() as i32;
-        let here = self.slice_idx.get() as i32;
-        for d in 1..=PREFETCH_RADIUS {
-            for n in [here - d, here + d] {
-                if n < 0 || n >= count {
-                    continue;
-                }
-                if let Some((nid, nfi)) = self.locate(n as usize) {
-                    if !self.cache.with_value(|c| c.contains(nid)) {
-                        fetch(this, nid, nfi, Some(generation));
-                    }
+        // Warm what is about to be looked at. The window points the way the
+        // user is travelling and is issued nearest-first, so the images most
+        // likely to be needed win the race for the disc.
+        let count = self.slice_count();
+        for n in xelray_core::prefetch_order(here, count, self.direction.get_value(), fast) {
+            if let Some((nid, nfi)) = self.locate(n) {
+                if !self.cache.with_value(|c| c.contains(nid)) {
+                    fetch(this, nid, nfi, Some(generation));
                 }
             }
         }
+    }
+
+    /// Note where we are and how fast we got here.
+    ///
+    /// Returns whether the user is moving quickly enough to want a wider
+    /// prefetch window. Cine always counts as moving.
+    fn track_motion(&self, idx: usize) -> bool {
+        let previous = self.last_idx.get_value();
+        let now = js_sys::Date::now();
+        let mut fast = self.playing.get_untracked();
+
+        if idx != previous {
+            // Flip the window on the very step that reverses, not the one
+            // after — the whole point is not to spend a beat pointing the
+            // wrong way.
+            self.direction
+                .set_value(if idx > previous { 1 } else { -1 });
+            fast |= now - self.last_step_at.get_value() < FAST_STEP_MS;
+            self.last_step_at.set_value(now);
+            self.last_idx.set_value(idx);
+        }
+        fast
+    }
+
+    // ---- cine ------------------------------------------------------------
+
+    /// Start or stop automatic playback.
+    pub fn toggle_cine(&self) {
+        if self.playing.get_untracked() {
+            self.stop_cine();
+        } else {
+            self.start_cine();
+        }
+    }
+
+    fn start_cine(&self) {
+        if self.slice_count_untracked() < 2 {
+            return;
+        }
+        self.stop_cine();
+        let this = *self;
+        let handle = set_interval_with_handle(
+            move || this.cine_tick(),
+            Duration::from_millis((1000.0 / CINE_FPS) as u64),
+        )
+        .ok();
+        self.cine.set_value(handle);
+        self.playing.set(true);
+    }
+
+    pub fn stop_cine(&self) {
+        if let Some(handle) = self.cine.get_value() {
+            handle.clear();
+        }
+        self.cine.set_value(None);
+        self.playing.set(false);
+    }
+
+    /// Stop playback because the user took the wheel.
+    ///
+    /// Every manual navigation calls this; playback only ever resumes by an
+    /// explicit toggle.
+    pub fn pause_cine(&self) {
+        if self.playing.get_untracked() {
+            self.stop_cine();
+        }
+    }
+
+    /// One frame of playback.
+    ///
+    /// Advances regardless of whether the last image finished decoding.
+    /// Frames are dropped rather than queued: each tick supersedes the last
+    /// request, and the generation counter makes the abandoned one discard
+    /// its result, so a slow disc makes playback skip rather than fall
+    /// progressively further behind.
+    fn cine_tick(&self) {
+        let count = self.slice_count_untracked();
+        if count < 2 {
+            self.stop_cine();
+            return;
+        }
+        // Wrap: a stack read end to end reads best as a loop.
+        self.slice_idx
+            .set((self.slice_idx.get_untracked() + 1) % count);
     }
 
     /// Hand a freshly cached slice to the screen, if it is the one being
@@ -419,6 +549,9 @@ impl Viewer {
 
     /// Drop the study and everything derived from it.
     fn reset_study(&self) {
+        self.direction.set_value(1);
+        self.last_idx.set_value(0);
+        self.last_step_at.set_value(0.0);
         self.study.set(None);
         self.decoded.set(None);
         self.decode_error.set(None);
@@ -433,6 +566,7 @@ impl Viewer {
 
     /// Drop the study and return to the landing screen.
     pub fn unload(&self) {
+        self.stop_cine();
         self.reset_study();
         self.help.set(false);
         self.reset_view();
@@ -585,6 +719,25 @@ fn Landing(v: Viewer) -> impl IntoView {
         }
     };
 
+    // Chromium can open a folder without claiming anything is being
+    // uploaded; everyone else gets the `webkitdirectory` input. Checked once
+    // per mount, by feature detection rather than by user agent.
+    let native_folder_picker = files::has_directory_picker();
+
+    let choose_folder = move |_| {
+        // Opened synchronously inside the click handler: the browser only
+        // allows the picker while the user's activation is still live, and
+        // awaiting first would spend it.
+        let promise = files::open_directory_picker();
+        spawn_local(async move {
+            // `None` is a cancelled dialog — the expected outcome half the
+            // time, and nothing to report.
+            if let Some(picked) = files::awaited_picker_files(promise).await {
+                v.load(picked);
+            }
+        });
+    };
+
     view! {
         <div class="landing">
             <div class="landing-brand">
@@ -598,18 +751,31 @@ fn Landing(v: Viewer) -> impl IntoView {
                 <p class="dz-sub">{move || v.t("xelray.drop.sub")}</p>
 
                 <div class="dz-buttons">
-                    <label class="btn">
-                        {move || v.t("xelray.drop.folder")}
-                        // `webkitdirectory` is the only cross-browser way to
-                        // pick a whole directory; Trunk leaves it verbatim.
-                        <input
-                            type="file"
-                            webkitdirectory=""
-                            directory=""
-                            multiple=""
-                            on:change=pick
-                        />
-                    </label>
+                    {if native_folder_picker {
+                        view! {
+                            <button class="btn" on:click=choose_folder>
+                                {move || v.t("xelray.drop.folder")}
+                            </button>
+                        }
+                        .into_view()
+                    } else {
+                        view! {
+                            <label class="btn">
+                                {move || v.t("xelray.drop.folder")}
+                                // The only way to pick a directory in Firefox
+                                // and Safari. Trunk leaves the attribute
+                                // verbatim.
+                                <input
+                                    type="file"
+                                    webkitdirectory=""
+                                    directory=""
+                                    multiple=""
+                                    on:change=pick
+                                />
+                            </label>
+                        }
+                        .into_view()
+                    }}
                     <label class="btn ghost">
                         {move || v.t("xelray.drop.files")}
                         <input type="file" multiple="" on:change=pick />
@@ -637,7 +803,10 @@ fn Landing(v: Viewer) -> impl IntoView {
                 </Show>
             </div>
 
-            <p class="privacy">{move || v.t("xelray.privacy")}</p>
+            <p class="privacy">
+                <span class="lock" aria-hidden="true">"🔒"</span>
+                <span>{move || v.t("xelray.privacy")}</span>
+            </p>
 
             <p class="landing-links">
                 <a href="https://xelth.com">"xelth.com"</a>
@@ -703,7 +872,7 @@ fn Rail(v: Viewer) -> impl IntoView {
 
             <div class="rail-body">
                 <div class="rail-sec">
-                    <div class="rail-head">
+                    <div class="rail-head nav">
                         {move || v.t("xelray.rail.scans")}
                         <span class="kbd-hint">"[ ]"</span>
                     </div>
@@ -746,16 +915,16 @@ fn Rail(v: Viewer) -> impl IntoView {
                 </div>
 
                 <div class="rail-sec">
-                    <div class="rail-head">
+                    <div class="rail-head window">
                         {move || v.t("xelray.rail.brightness")}
                         <span class="kbd-hint">"1-4"</span>
                     </div>
                     <div class="grid2">
-                        {PRESET_KEYS.iter().enumerate().map(|(i, key)| {
+                        {PRESET_KEYS.iter().enumerate().map(|(i, (key, tint))| {
                             let (_, width, center) = WINDOW_PRESETS[i];
                             view! {
                                 <button
-                                    class="tool"
+                                    class=format!("tool chip preset {tint}")
                                     class:active=move || {
                                         (v.ww.get() - width).abs() < 0.5
                                             && (v.wl.get() - center).abs() < 0.5
@@ -775,20 +944,20 @@ fn Rail(v: Viewer) -> impl IntoView {
                 </div>
 
                 <div class="rail-sec">
-                    <div class="rail-head">
+                    <div class="rail-head view">
                         {move || v.t("xelray.rail.size")}
                         <span class="kbd-hint">"+ - 0"</span>
                     </div>
                     <div class="grid2">
-                        <button class="tool" title=move || v.t("xelray.zoom_in.tip")
+                        <button class="tool chip zoom-in" title=move || v.t("xelray.zoom_in.tip")
                             on:click=move |_| v.zoom_by(1.25)
                         >{move || v.t("xelray.zoom_in")}</button>
-                        <button class="tool" title=move || v.t("xelray.zoom_out.tip")
+                        <button class="tool chip zoom-out" title=move || v.t("xelray.zoom_out.tip")
                             on:click=move |_| v.zoom_by(1.0 / 1.25)
                         >{move || v.t("xelray.zoom_out")}</button>
                     </div>
                     <button
-                        class="tool wide"
+                        class="tool wide chip fit"
                         title=move || v.t("xelray.fit.tip")
                         on:click=move |_| v.reset_view()
                     >{move || v.t("xelray.fit")}</button>
@@ -806,7 +975,7 @@ fn Rail(v: Viewer) -> impl IntoView {
                 </div>
 
                 <div class="rail-sec">
-                    <div class="rail-head">
+                    <div class="rail-head nav">
                         {move || v.t("xelray.rail.image")}
                         <span class="kbd-hint">"↑ ↓"</span>
                     </div>
@@ -816,6 +985,19 @@ fn Rail(v: Viewer) -> impl IntoView {
                             format!("{} / {}", (v.slice_idx.get() + 1).min(n.max(1)), n)
                         }}
                     </div>
+                    <button
+                        class="tool wide chip cine"
+                        class:active=move || v.playing.get()
+                        title=move || v.t("xelray.cine.tip")
+                        on:click=move |_| v.toggle_cine()
+                    >
+                        {move || if v.playing.get() {
+                            v.t("xelray.cine.pause")
+                        } else {
+                            v.t("xelray.cine.play")
+                        }}
+                        <span class="kbd-hint">"Space"</span>
+                    </button>
                     <input
                         type="range"
                         class="scrub"
@@ -825,6 +1007,7 @@ fn Rail(v: Viewer) -> impl IntoView {
                         prop:value=move || v.slice_idx.get().to_string()
                         on:input=move |ev| {
                             if let Ok(i) = event_target_value(&ev).parse::<usize>() {
+                                v.pause_cine();
                                 v.slice_idx.set(i);
                             }
                         }
@@ -887,7 +1070,13 @@ fn HelpOverlay(v: Viewer) -> impl IntoView {
                     {shortcuts::HELP.iter().map(|(group, keys, what)| view! {
                         <>
                             // An empty group key continues the row above it.
-                            <div class="hk-group">
+                            // `xelray.help.group.view` -> class `view`, so the
+                            // cheat sheet is colour-coded the same way the
+                            // rail is.
+                            <div class=format!(
+                                "hk-group {}",
+                                group.rsplit('.').next().unwrap_or(""),
+                            )>
                                 {move || if group.is_empty() {
                                     String::new()
                                 } else {

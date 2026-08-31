@@ -58,9 +58,11 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("xelray.drop.folder", "Choose folder"),
     ("xelray.drop.files", "Choose files"),
+    // The padlock is drawn as its own element beside this, so translators
+    // get a plain sentence and the icon can be sized and coloured.
     (
         "xelray.privacy",
-        "🔒 Files are processed locally in your browser and never uploaded.",
+        "Files are processed locally in your browser and never uploaded.",
     ),
     ("xelray.indexing", "{done} of {total} files indexed…"),
     ("xelray.no_dicom", "No DICOM files found in that drop."),
@@ -110,6 +112,12 @@ pub const EN: &[(&str, &str)] = &[
         "Show or hide the name, date and numbers over the image (O)",
     ),
     ("xelray.scrub.tip", "Drag to move through the images"),
+    ("xelray.cine.play", "Play"),
+    ("xelray.cine.pause", "Pause"),
+    (
+        "xelray.cine.tip",
+        "Play through the images automatically (Space)",
+    ),
     ("xelray.shortcuts", "Keyboard shortcuts"),
     ("xelray.shortcuts.tip", "List every keyboard shortcut (? or H)"),
     ("xelray.open_another", "Open another study"),
@@ -135,6 +143,7 @@ pub const EN: &[(&str, &str)] = &[
     ("xelray.help.step", "Previous / next image"),
     ("xelray.help.jump", "Jump 10 images"),
     ("xelray.help.ends", "First / last image"),
+    ("xelray.help.cine", "Play / pause automatic playback"),
     ("xelray.help.series", "Previous / next series"),
     ("xelray.help.series_alt", "The same, either hand"),
     ("xelray.help.presets", "Soft tissue · Lung · Bone · Brain"),

@@ -23,6 +23,107 @@ pub fn from_file_list(list: &FileList) -> Vec<File> {
     (0..list.length()).filter_map(|i| list.get(i)).collect()
 }
 
+// ---------------------------------------------------------------------------
+// Folder picking
+//
+// `<input webkitdirectory>` makes Chrome ask "Upload 995 files to this site?"
+// — in the user's own language, with the word *upload* in it. XelRay uploads
+// nothing, and being told otherwise by the browser, every single time, is
+// worse than a papercut: it contradicts the one promise the whole tool makes.
+//
+// The File System Access API asks instead to *view* files, once, which is
+// both milder and true. It is Chromium-only, so the input stays as the
+// fallback for Firefox and Safari.
+//
+// This is a JS shim rather than `web_sys`'s bindings because those are behind
+// `--cfg web_sys_unstable_apis`, a flag that would have to be set for every
+// build of the whole crate graph. Twenty lines of JS keeps the flag out of
+// the project entirely, and directory traversal is more natural in a language
+// with `for await` than through hand-rolled async-iterator plumbing.
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen(inline_js = r#"
+export function has_directory_picker() {
+    return typeof window.showDirectoryPicker === 'function';
+}
+
+// Resolves to an Array of File, or null if the user cancelled or the picker
+// could not be opened. Never rejects: the caller treats every failure the
+// same way, by doing nothing.
+export async function pick_directory() {
+    if (typeof window.showDirectoryPicker !== 'function') return null;
+
+    let root;
+    try {
+        // Called before the first await, so the click's transient activation
+        // is still live.
+        root = await window.showDirectoryPicker({ mode: 'read' });
+    } catch (e) {
+        // AbortError is the user closing the dialog — the expected outcome
+        // half the time, and not a failure.
+        return null;
+    }
+
+    // Hospital CDs nest: PA000000/ST000000/SE000000/IM000000. Iterative so a
+    // deep tree cannot blow the stack.
+    const files = [];
+    const queue = [root];
+    while (queue.length > 0) {
+        const dir = queue.pop();
+        try {
+            for await (const entry of dir.values()) {
+                if (entry.kind === 'file') {
+                    // One unreadable entry must not lose the other 994.
+                    try { files.push(await entry.getFile()); } catch (e) {}
+                } else if (entry.kind === 'directory') {
+                    queue.push(entry);
+                }
+            }
+        } catch (e) {}
+    }
+    return files;
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(js_name = has_directory_picker)]
+    fn has_directory_picker_js() -> bool;
+
+    #[wasm_bindgen(js_name = pick_directory)]
+    fn pick_directory_js() -> js_sys::Promise;
+}
+
+/// Whether this browser can open a folder without the upload warning.
+///
+/// Feature detection, deliberately not a user-agent test: the API arrives in
+/// browsers on their own schedule and can be disabled by policy.
+pub fn has_directory_picker() -> bool {
+    has_directory_picker_js()
+}
+
+/// Open the native folder picker.
+///
+/// Call this *synchronously* from the click handler — the returned promise
+/// can be awaited later, but the picker must be opened while the user's
+/// activation is still live or the browser will refuse it.
+pub fn open_directory_picker() -> js_sys::Promise {
+    pick_directory_js()
+}
+
+/// Resolve the picker's promise into files.
+///
+/// `None` means cancelled or unavailable, and is not an error worth showing
+/// anyone.
+pub async fn awaited_picker_files(promise: js_sys::Promise) -> Option<Vec<File>> {
+    let value = JsFuture::from(promise).await.ok()?;
+    let array = value.dyn_into::<Array>().ok()?;
+    Some(
+        array
+            .iter()
+            .filter_map(|v| v.dyn_into::<File>().ok())
+            .collect(),
+    )
+}
+
 /// Collect every file in a drop, descending into dropped folders.
 ///
 /// Chrome and Firefox expose dropped directories only through

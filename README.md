@@ -13,7 +13,10 @@ files with no extension. The bundled viewer is a Windows-only executable from
 2009, and every "free online DICOM viewer" wants you to upload your scan to
 somebody's server first.
 
-XelRay is the other option. Drop the folder into the page. The DICOM parser is
+XelRay is the other option. Drop the folder into the page — or pick it, and
+on Chromium you are asked to *view* the files rather than warned about
+uploading 995 of them, because XelRay uses the File System Access API where
+it exists. The DICOM parser is
 Rust compiled to WebAssembly and runs inside your browser tab — there is no
 backend, no upload, no account. Close the tab and nothing is left anywhere.
 
@@ -45,6 +48,10 @@ backend, no upload, no account. Close the tab and nothing is left anywhere.
 - **Trackpad native** — two-finger scroll steps through the stack with the
   deltas accumulated, so one swipe moves a few images rather than thirty;
   pinch zooms smoothly. Touch screens get swipe and pinch too.
+- **Cine playback** — `Space` plays the stack as a loop at 15 fps, the way
+  the old hospital workstations do. Any manual navigation pauses it; frames
+  are dropped rather than queued, so a slow disc makes it skip instead of
+  drifting further behind.
 - **Bounded memory** — a 500 MB hospital CD opens in a 32-bit WebAssembly
   heap, because the study is never held in memory. Loading reads a 64 KB
   prefix of each file, keeps a few hundred bytes of metadata and drops the
@@ -68,6 +75,7 @@ something.
 | `↑` `↓` | Previous / next image |
 | `Shift+↑` `Shift+↓` | Jump 10 images |
 | `g` `G` | First / last image |
+| `Space` | Play / pause automatic playback (cine) |
 | `←` `→` or `[` `]` | Previous / next series |
 | `1` `2` `3` `4` | Soft tissue · Lung · Bone · Brain |
 | `=` `-` | Zoom in / out |
@@ -164,8 +172,10 @@ ever loaded whole:
 - Displaying an image reads that one file, decodes it, and puts the result in
   a `SliceCache`: an LRU budgeted in *bytes* (48 MB by default), because slice
   size varies by an order of magnitude across modalities. Neighbours ±3 are
-  prefetched; navigating bumps a generation counter so work the user has
-  scrolled past is abandoned instead of completed.
+  prefetched in the direction of travel — six ahead and two behind, widening
+  to ten ahead while scrolling fast — and the window flips on the step that
+  reverses. Navigating bumps a generation counter so speculative work the
+  user has scrolled past is abandoned before it reads anything.
 
 For a 1000-image 512² CT that comes to roughly **60–70 MB**: ~130 KB of
 index, 48 MB of decoded slices, and a transient megabyte or two for the file
@@ -224,7 +234,7 @@ XelRay работает иначе: перетащите папку в окно 
 
 Всё управление доступно с клавиатуры: `↑`/`↓` — срезы, `Shift+↑`/`↓` — по
 десять, `g`/`G` — первый и последний, `←`/`→` — серии, `1`–`4` — пресеты окна,
-`=`/`-` — масштаб, `0` — вписать в окно, `s` — убрать панель (снимок займёт
+`=`/`-` — масштаб, `0` — вписать в окно, `Space` — автопрокрутка (кино), `s` — убрать панель (снимок займёт
 весь экран), `o` — убрать подписи, `?` — список горячих клавиш.
 
 Открыть: <https://xelth.com/M/xelray/>
