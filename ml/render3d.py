@@ -78,12 +78,24 @@ MODEBAR = {
     "hover_toggle": "Toggle show closest data on hover",
 }
 
-PLOT_CONFIG = {"displaylogo": False, "responsive": True}
+PLOT_CONFIG = {
+    "displaylogo": False,
+    "responsive": True,
+    # A medical document must never offer to post its data to a third-party
+    # cloud; this removes plotly's "Share chart…" (chart-studio) button.
+    "modeBarButtonsToRemove": ["sendDataToCloud"],
+}
 
 # The title is deliberately language-neutral; the caption below it is assembled at
 # runtime purely from translated keys. The legend hint stays English.
 TITLE = "XelRay — CT 3D"
 HINT = "drag to rotate · scroll to zoom · right-drag to pan · click legend to show/hide"
+# Proper names stay untranslated; shown as a small footer credit line.
+CREDIT = (
+    "Segmentation: MONAI wholeBody_ct_segmentation (SegResNet) — Project MONAI, "
+    "trained on the TotalSegmentator dataset (Wasserthal et al., Radiology AI 2023) · "
+    "viewer: plotly.js · xelth.com/M"
+)
 OFFLINE_NOTE = "offline — language change needs a connection"
 
 # label ids from the bundle's configs/metadata.json -> channel_def
@@ -542,7 +554,12 @@ def main() -> None:
                 text=HINT, showarrow=False, xref="paper", yref="paper",
                 x=0.5, y=0, xanchor="center", yanchor="bottom",
                 font=dict(size=11, color="#8b9099"),
-            )
+            ),
+            dict(
+                text=CREDIT, showarrow=False, xref="paper", yref="paper",
+                x=0.5, y=-0.045, xanchor="center", yanchor="bottom",
+                font=dict(size=9, color="#5f6570"),
+            ),
         ],
     )
 
