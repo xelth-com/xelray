@@ -55,6 +55,7 @@ EN = {
     "bones": "Bones",
     "tumor_region": "Tumor region (estimate)",
     "ai_disclaimer": "AI segmentation, not a diagnosis.",
+    "unit_ml": "ml",
 }
 
 I18N_URL = "https://xelth.com/i18n/"
@@ -245,8 +246,8 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
       var s = S[k];
       if (D.vols[n] != null) {{
         s += k === "tumor_region"
-           ? " ~" + Math.round(D.vols[n]) + " ml"
-           : " (" + Math.round(D.vols[n]) + " ml)";
+           ? " ~" + Math.round(D.vols[n]) + " " + S.unit_ml
+           : " (" + Math.round(D.vols[n]) + " " + S.unit_ml + ")";
       }}
       return s;
     }});
