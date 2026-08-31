@@ -44,7 +44,8 @@ LANG_NAMES = {
 # Only English is embedded, so the page renders fully offline out of the box.
 # The other eight languages are fetched at view time from the XelRay i18n endpoint
 # and then cached in localStorage, so a later *offline* reopen still shows the
-# language the reader last picked. Keys mirror `xelray.organ.*` on the server.
+# language the reader last picked. Keys mirror `xelray.organ.*` on the server;
+# the modebar tooltips below mirror `xelray.viewer3d.*`.
 EN = {
     "kidney_left": "Left kidney",
     "kidney_right": "Right kidney",
@@ -60,6 +61,24 @@ EN = {
 
 I18N_URL = "https://xelth.com/i18n/"
 I18N_PREFIX = "xelray.organ."
+I18N_PREFIX_UI = "xelray.viewer3d."
+
+# Plotly's own modebar tooltips. A plotly locale dictionary is keyed by plotly's
+# *English* strings, so the English value of each key is also the dictionary key
+# it translates -- which is why this map doubles as the English fallback. The
+# strings must match the bundle exactly (note the upper-case "PNG").
+MODEBAR = {
+    "download_png": "Download plot as a PNG",
+    "zoom": "Zoom",
+    "pan": "Pan",
+    "orbital": "Orbital rotation",
+    "turntable": "Turntable rotation",
+    "reset_camera": "Reset camera to default",
+    "reset_camera_saved": "Reset camera to last save",
+    "hover_toggle": "Toggle show closest data on hover",
+}
+
+PLOT_CONFIG = {"displaylogo": False, "responsive": True}
 
 # The title is deliberately language-neutral; the caption below it is assembled at
 # runtime purely from translated keys. The legend hint stays English.
@@ -179,17 +198,39 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
     choice -- a later offline reopen restores that language from cache. If a fetch
     for an uncached language fails, the current language is kept and a small note
     appears; nothing else breaks.
+
+    One bundle carries two key spaces: `xelray.organ.*` for the meshes and
+    `xelray.viewer3d.*` for plotly's own modebar tooltips. Either may be missing
+    per language; every key falls back to the embedded English individually.
+
+    Applying a language is a `Plotly.react` with a fresh config, not a bare
+    `restyle`, for two reasons:
+
+    * modebar tooltips are translated through plotly's `locale`/`locales` config,
+      which is only read when the plot's context is rebuilt; and
+    * `restyle({name})` updates the legend but *not* the hover label. A gl3d
+      scene keeps its own wrapper per trace and the hover box reads that
+      wrapper's `.name`, which is only refreshed by a scene re-plot -- a name
+      edit is an `editType: "style"` change, and `doTraceStyle` redraws the
+      legend without touching the WebGL scene. The camera is carried across the
+      re-plot explicitly so the reader's view survives the switch.
     """
     options = "".join(f'<option value="{lg}">{LANG_NAMES[lg]}</option>' for lg in LANGS)
     payload = json.dumps(
         {
             "langs": LANGS,
             "en": EN,
+            "ui": MODEBAR,
             "keys": trace_keys,
-            "vols": volumes,
+            # Pre-rounded the way the baked English labels are, so a language
+            # switch never nudges a volume by 1 ml (python and JS disagree on
+            # halves: format(96.5, ".0f") is 96, Math.round(96.5) is 97).
+            "vols": [None if v is None else int(f"{v:.0f}") for v in volumes],
             "title": TITLE,
             "url": I18N_URL,
             "prefix": I18N_PREFIX,
+            "prefixUi": I18N_PREFIX_UI,
+            "config": PLOT_CONFIG,
             "offline": OFFLINE_NOTE,
         },
         ensure_ascii=True,  # \uXXXX escapes: safe whatever encoding the file is served as
@@ -197,14 +238,14 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
     return f"""
 <style>
   #xr-lang {{
-    position: fixed; top: 12px; right: 16px; z-index: 999;
+    position: fixed; top: 12px; left: 16px; z-index: 999;
     background: #191c21; color: #e8e4de; border: 1px solid #3a3f46;
     border-radius: 6px; padding: 5px 9px; font: 13px system-ui, sans-serif;
   }}
   #xr-lang:hover {{ border-color: #6a7079; }}
   #xr-note {{
-    position: fixed; top: 48px; right: 16px; z-index: 999; max-width: 240px;
-    color: #8b9099; font: 11px system-ui, sans-serif; text-align: right;
+    position: fixed; top: 48px; left: 16px; z-index: 999; max-width: 240px;
+    color: #8b9099; font: 11px system-ui, sans-serif; text-align: left;
     opacity: 0; transition: opacity .25s; pointer-events: none;
   }}
   #xr-note.on {{ opacity: 1; }}
@@ -218,6 +259,7 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
   var note = document.getElementById("xr-note");
   var current = "en";
   var noteTimer = null;
+  var busy = false;
 
   function ls(op, k, v) {{
     try {{
@@ -234,30 +276,79 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
     noteTimer = setTimeout(function () {{ note.classList.remove("on"); }}, 4000);
   }}
 
-  // `strings` is a flat map of the 9 organ keys. Any key the server omits for a
-  // given language falls back to English rather than rendering blank.
-  function render(lang, strings) {{
-    var gd = document.querySelector(".plotly-graph-div");
-    if (!gd || !window.Plotly) return;
-    var S = {{}};
-    Object.keys(D.en).forEach(function (k) {{ S[k] = strings[k] || D.en[k]; }});
+  // Plotly locale dictionaries are keyed by plotly's English strings, so D.ui
+  // maps our key -> that English string -> the translation (English if absent).
+  function makeConfig(lang, U) {{
+    var c = {{}};
+    Object.keys(D.config).forEach(function (k) {{ c[k] = D.config[k]; }});
+    c.locale = lang;
+    if (lang !== "en") {{
+      var dict = {{}};
+      Object.keys(D.ui).forEach(function (k) {{ dict[D.ui[k]] = U[k]; }});
+      c.locales = {{}};
+      c.locales[lang] = {{ dictionary: dict }};
+    }}
+    return c;
+  }}
 
-    var names = D.keys.map(function (k, n) {{
+  // Belt and braces: after the re-plot, make each gl3d trace wrapper (whose
+  // `.name` is what the hover box prints) agree with its trace again.
+  function syncHoverNames(gd) {{
+    try {{
+      var scene = gd._fullLayout && gd._fullLayout.scene && gd._fullLayout.scene._scene;
+      if (!scene || !scene.traces) return;
+      Object.keys(scene.traces).forEach(function (uid) {{
+        for (var i = 0; i < gd._fullData.length; i++) {{
+          if (gd._fullData[i].uid === uid) {{
+            scene.traces[uid].name = gd._fullData[i].name;
+            return;
+          }}
+        }}
+      }});
+    }} catch (e) {{}}
+  }}
+
+  // `bundle` is {{organ: {{...}}, ui: {{...}}}}; any key the server omits for a
+  // given language falls back to English rather than rendering blank.
+  function render(lang, bundle) {{
+    var gd = document.querySelector(".plotly-graph-div");
+    if (!gd || !window.Plotly || !gd.data) return;
+    var organ = bundle.organ || {{}};
+    var ui = bundle.ui || {{}};
+    var S = {{}}, U = {{}};
+    Object.keys(D.en).forEach(function (k) {{ S[k] = organ[k] || D.en[k]; }});
+    Object.keys(D.ui).forEach(function (k) {{ U[k] = ui[k] || D.ui[k]; }});
+
+    D.keys.forEach(function (k, n) {{
       var s = S[k];
       if (D.vols[n] != null) {{
         s += k === "tumor_region"
-           ? " ~" + Math.round(D.vols[n]) + " " + S.unit_ml
-           : " (" + Math.round(D.vols[n]) + " " + S.unit_ml + ")";
+           ? " ~" + D.vols[n] + " " + S.unit_ml
+           : " (" + D.vols[n] + " " + S.unit_ml + ")";
       }}
-      return s;
+      if (gd.data[n]) gd.data[n].name = s;
     }});
     var caption = S.kidney_left + ": " + S.tumor_region + " \\u00b7 " + S.ai_disclaimer;
+    gd.layout.title.text = D.title +
+      "<br><span style='font-size:13px;color:#ff8a70'>" + caption + "</span>";
 
-    Plotly.restyle(gd, {{ name: names }});
-    Plotly.relayout(gd, {{
-      "title.text": D.title +
-        "<br><span style='font-size:13px;color:#ff8a70'>" + caption + "</span>"
-    }});
+    // Keep the view the reader is on: the re-plot would otherwise snap back to
+    // the camera baked into the figure. The scene's own camera is the only
+    // reliable source -- `layout.scene.camera` is only written back on the
+    // relayout that ends a drag, so it can lag a rotation by a whole gesture.
+    var cam = null;
+    try {{
+      var scene = gd._fullLayout.scene;
+      cam = (scene._scene && scene._scene.getCamera()) || scene.camera;
+    }} catch (e) {{}}
+    if (cam) gd.layout.scene.camera = cam;
+
+    busy = true;
+    Plotly.react(gd, gd.data, gd.layout, makeConfig(lang, U)).then(function () {{
+      syncHoverNames(gd);
+      busy = false;
+    }}, function () {{ busy = false; }});
+
     document.documentElement.lang = lang;
     current = lang;
     sel.value = lang;
@@ -267,12 +358,18 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
   function cached(lang) {{
     var raw = ls("get", "xr-i18n-" + lang);
     if (!raw) return null;
-    try {{ return JSON.parse(raw); }} catch (e) {{ return null; }}
+    try {{
+      var v = JSON.parse(raw);
+      if (!v || typeof v !== "object") return null;
+      // Tolerate the older cache shape, which was a flat map of organ keys.
+      return v.organ ? v : {{ organ: v, ui: {{}} }};
+    }} catch (e) {{ return null; }}
   }}
 
   function select(lang, quiet) {{
     if (D.langs.indexOf(lang) < 0) lang = "en";
-    if (lang === "en") {{ render("en", D.en); return; }}
+    if (busy) {{ sel.value = current; return; }}
+    if (lang === "en") {{ render("en", {{ organ: D.en, ui: D.ui }}); return; }}
 
     var hit = cached(lang);
     if (hit) {{ render(lang, hit); return; }}
@@ -283,13 +380,19 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
         return r.json();
       }})
       .then(function (all) {{
-        var strings = {{}};
+        var bundle = {{ organ: {{}}, ui: {{}} }};
         Object.keys(all).forEach(function (k) {{
-          if (k.indexOf(D.prefix) === 0) strings[k.slice(D.prefix.length)] = all[k];
+          if (k.indexOf(D.prefix) === 0) {{
+            bundle.organ[k.slice(D.prefix.length)] = all[k];
+          }} else if (k.indexOf(D.prefixUi) === 0) {{
+            bundle.ui[k.slice(D.prefixUi.length)] = all[k];
+          }}
         }});
-        if (!Object.keys(strings).length) throw new Error("no " + D.prefix + " keys");
-        ls("set", "xr-i18n-" + lang, JSON.stringify(strings));
-        render(lang, strings);
+        // The viewer3d keys may not be deployed yet; the organ names are what
+        // makes a language worth switching to, so only those are required.
+        if (!Object.keys(bundle.organ).length) throw new Error("no " + D.prefix + " keys");
+        ls("set", "xr-i18n-" + lang, JSON.stringify(bundle));
+        render(lang, bundle);
       }})
       .catch(function () {{
         sel.value = current;          // keep whatever is on screen
@@ -305,7 +408,9 @@ def language_widget(trace_keys: list[str], volumes: list[float | None]) -> str:
   sel.addEventListener("change", function () {{ select(sel.value, false); }});
 
   function boot() {{
-    render("en", D.en);               // always paint something first
+    // English is already baked into the figure -- only re-plot to change it.
+    sel.value = "en";
+    document.documentElement.lang = "en";
     if (initial !== "en") select(initial, true);
   }}
   if (document.readyState === "loading") {{
@@ -411,6 +516,11 @@ def main() -> None:
             f"{tr('kidney_left')}: {tr('tumor_region')}"
             f" · {tr('ai_disclaimer')}</span>",
             x=0.5, xanchor="center", font=dict(size=20, color="#e8e4de"),
+            # Anchored to the container top with a pixel pad, so the title band
+            # starts *below* the language picker in the top-left corner at any
+            # window size -- with the default (paper-relative) placement a narrow
+            # window slides the centred title up and left into the picker.
+            yref="container", y=1, yanchor="top", pad=dict(t=64),
         ),
         scene=dict(
             xaxis=axis, yaxis=axis, zaxis=axis,
@@ -426,7 +536,7 @@ def main() -> None:
             font=dict(size=13, color="#e8e4de"), itemsizing="constant",
             x=0.01, y=0.99,
         ),
-        margin=dict(l=0, r=0, t=90, b=40),
+        margin=dict(l=0, r=0, t=118, b=40),
         annotations=[
             dict(
                 text=HINT, showarrow=False, xref="paper", yref="paper",
@@ -438,7 +548,7 @@ def main() -> None:
 
     html = fig.to_html(
         include_plotlyjs=True, full_html=True,
-        config={"displaylogo": False, "responsive": True},
+        config=dict(PLOT_CONFIG, locale="en"),
     )
     widget = language_widget(trace_keys, trace_vols)
     if "</body>" not in html:
