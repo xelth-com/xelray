@@ -72,8 +72,8 @@ I18N_PREFIX_UI = "xelray.viewer3d."
 # be missing a whole block of strings; bump this whenever the cached shape gains
 # something, and such an entry is shown at once and refetched in the background
 # rather than being trusted or thrown away. 1 was organ names alone, 2 added the
-# `xelray.viewer3d.*` modebar strings.
-CACHE_VERSION = 2
+# `xelray.viewer3d.*` modebar strings, 3 added the gesture hint.
+CACHE_VERSION = 3
 
 # Plotly's own modebar tooltips. A plotly locale dictionary is keyed by plotly's
 # *English* strings, so the English value of each key is also the dictionary key
@@ -101,9 +101,18 @@ PLOT_CONFIG = {
 }
 
 # The document title is language-neutral; the rail's caption is assembled at
-# runtime purely from translated keys. The gesture hint stays English.
+# runtime purely from translated keys.
 TITLE = "XelRay — CT 3D"
+# Embedded English for `xelray.viewer3d.hint`, so the gesture line reads without
+# a network the way every other English string here does.
 HINT = "drag to rotate · scroll to zoom · right-drag to pan · click an organ to show or hide it"
+
+# The whole `xelray.viewer3d.*` key space with its embedded English. `MODEBAR`
+# is the subset that feeds plotly's locale dictionary; `hint` is ours and goes
+# straight into the rail, so it must not be handed to plotly as a dictionary
+# key. Both arrive in the same fetched bundle.
+VIEWER_UI = dict(MODEBAR, hint=HINT)
+
 # The render's surround. Pure black, like the DICOM viewer's stage: any tint
 # behind the meshes shifts how bright the tissue colours read.
 STAGE = "#000000"
@@ -446,6 +455,7 @@ JS = r"""
   var sel = document.getElementById("xr-lang");
   var note = document.getElementById("xr-note");
   var caption = document.getElementById("xr-caption");
+  var hint = document.getElementById("xr-hint");
   var tab = document.getElementById("xr-show");
   var current = "en";
   var noteTimer = null;
@@ -509,7 +519,9 @@ JS = r"""
     Plotly.restyle(gd, { visible: !shown(gd, n) }, [n]).then(paint, paint);
   }
 
-  function retext(S) {
+  // `S` is the organ space, `U` the viewer3d one. The credit line is left out
+  // on purpose: it is proper names and a citation.
+  function retext(S, U) {
     D.keys.forEach(function (k, n) {
       rows[n].querySelector(".nm").textContent = S[k];
       rows[n].querySelector(".ml").textContent =
@@ -517,6 +529,7 @@ JS = r"""
     });
     caption.textContent =
       S.kidney_left + ": " + S.tumor_region + " · " + S.ai_disclaimer;
+    hint.textContent = U.hint;
   }
 
   function fold(on) {
@@ -530,13 +543,15 @@ JS = r"""
 
   // Plotly locale dictionaries are keyed by plotly's English strings, so D.ui
   // maps our key -> that English string -> the translation (English if absent).
+  // Only D.modebar's keys go in: the rest of the viewer3d space (the hint) is
+  // ours, and plotly has no English string of its own to match it against.
   function makeConfig(lang, U) {
     var c = {};
     Object.keys(D.config).forEach(function (k) { c[k] = D.config[k]; });
     c.locale = lang;
     if (lang !== "en") {
       var dict = {};
-      Object.keys(D.ui).forEach(function (k) { dict[D.ui[k]] = U[k]; });
+      D.modebar.forEach(function (k) { dict[D.ui[k]] = U[k]; });
       c.locales = {};
       c.locales[lang] = { dictionary: dict };
     }
@@ -572,7 +587,7 @@ JS = r"""
     Object.keys(D.ui).forEach(function (k) { U[k] = ui[k] || D.ui[k]; });
 
     // The rail is plain DOM and retexts instantly.
-    retext(S);
+    retext(S, U);
     document.documentElement.lang = lang;
     current = lang;
     sel.value = lang;
@@ -714,7 +729,7 @@ JS = r"""
 
   function boot() {
     buildRail();
-    retext(D.en);                     // English is baked into the figure
+    retext(D.en, D.ui);               // English is baked into the figure
     paint();
     sel.value = "en";
     if (ls("get", "xr-rail") === "0") fold(true);
@@ -769,7 +784,9 @@ def page(
         {
             "langs": LANGS,
             "en": EN,
-            "ui": MODEBAR,
+            "ui": VIEWER_UI,
+            # Which of the viewer3d keys plotly's locale dictionary takes.
+            "modebar": list(MODEBAR),
             "keys": trace_keys,
             "colors": colors,
             # Pre-rounded the way the baked English labels are, so a language
@@ -808,7 +825,7 @@ def page(
       <div class="rail-links">
         <select class="lang" id="xr-lang" aria-label="Language">{options}</select>
       </div>
-      <p class="hint">{HINT}</p>
+      <p class="hint" id="xr-hint">{HINT}</p>
       <p class="credit">{CREDIT}</p>
       <p class="note" id="xr-note" role="status"></p>
     </div>
