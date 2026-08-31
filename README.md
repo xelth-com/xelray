@@ -192,11 +192,56 @@ Multi-frame instances currently show their first frame only; the stack is
 built from single-frame instances, which is what CT and MR studies on a
 hospital CD look like.
 
+## Beyond viewing: the `ml/` bench
+
+[`ml/`](ml/) is the research bench for what comes next: AI segmentation of the
+loaded study, eventually running in the browser too.
+
+- [`ml/segment.py`](ml/segment.py) runs the MONAI
+  [`wholeBody_ct_segmentation`](https://huggingface.co/MONAI/wholeBody_ct_segmentation)
+  bundle (SegResNet, 3 mm, 104 anatomical structures, Apache-2.0) on a DICOM
+  series — **CPU only**. On a stock laptop i5 a 500-image contrast CT indexes,
+  segments and renders overlays in about **2 minutes 20 seconds**; the
+  sliding-window inference itself is 70–80 s. No GPU involved.
+- [`ml/render3d.py`](ml/render3d.py) turns the label map into a single
+  self-contained interactive 3D HTML — plotly.js embedded, organ meshes with
+  visibility toggles in a XelRay-styled rail, nine languages, works from a USB
+  stick. On real clinical data the segmentation flagged a renal tumour exactly
+  where the radiology report placed it, as a 26 % volume asymmetry and a
+  shape defect between the kidneys.
+
+The bench's measured numbers drive the browser-port design: the model is
+75 MB (a one-time download the browser caches), compute fits a laptop, and
+the only real obstacle for wasm32 is holding the 105-channel logits — which
+streaming argmax per window removes.
+
+### Sharing
+
+A finished 3D document can stay a local file, or be published at a short link:
+`https://xelth.com/{code}` where `{code}` is a UUID in the eck base32 alphabet
+(`0123456789ABCDEFGHJKLMNPQRTUVWXY` — no `I/O/S/Z`, so codes survive being
+read aloud), with a QR code and a two-character check pair. Uploads are
+accepted only from app instances served by xelth.com — a short-lived HMAC
+token, no CORS — so the open-source client contains no secret, and documents
+expire after 30 days. Saving to disk needs none of that and never talks to a
+server.
+
+## Roadmap
+
+- **In-browser segmentation** — the `ml/` pipeline ported to onnxruntime-web:
+  model fetched from Hugging Face by the user's own browser, inference on
+  their machine, a "digitise" button in the viewer. The privacy story stays
+  intact: nothing leaves the tab unless the user shares it.
+- **MPR** — sagittal and coronal reconstructions from the loaded stack; the
+  geometry is already parsed.
+- Measurements (distance, HU probe) on the slice canvas.
+
 ## Privacy
 
 There is no server component in this repository, and the app makes no network
-requests after the page itself has loaded. Files are read with the browser's
-File API into WebAssembly memory and discarded when the tab closes.
+requests after the page itself has loaded, except an optional fetch of UI
+translations from its own origin. Files are read with the browser's File API
+into WebAssembly memory and discarded when the tab closes.
 
 XelRay is a viewer, not a diagnostic device. It is not certified medical
 software — do not use it to make clinical decisions.
@@ -204,7 +249,21 @@ software — do not use it to make clinical decisions.
 ## Part of the xelth.com medical tools family
 
 XelRay is the first tool in the `/M/` (medical) section of
-[xelth.com](https://xelth.com). More to follow.
+[xelth.com](https://xelth.com/M/). Next up: wideband electro-spectral
+bioimpedance analysis.
+
+## Acknowledgements
+
+- [dicom-rs](https://github.com/Enet4/dicom-rs) — the Rust DICOM
+  implementation this viewer is built on.
+- [Project MONAI](https://monai.io/) and the
+  [`wholeBody_ct_segmentation`](https://huggingface.co/MONAI/wholeBody_ct_segmentation)
+  bundle authors.
+- [TotalSegmentator](https://github.com/wasserth/TotalSegmentator) — Wasserthal
+  et al., *Radiology: Artificial Intelligence* 2023 — whose openly licensed
+  dataset trained that model.
+- [Leptos](https://leptos.dev/), [Trunk](https://trunkrs.dev/) and
+  [plotly.js](https://plotly.com/javascript/).
 
 ## License
 
@@ -238,6 +297,13 @@ XelRay работает иначе: перетащите папку в окно 
 весь экран), `o` — убрать подписи, `?` — список горячих клавиш.
 
 Открыть: <https://xelth.com/M/xelray/>
+
+В каталоге [`ml/`](ml/) — исследовательский стенд следующего шага: сегментация
+исследования нейросетью MONAI (104 структуры тела, 2–3 минуты на обычном
+ноутбуке без видеокарты) и сборка интерактивного 3D-документа одним
+HTML-файлом, с девятью языками и возможностью опубликовать его короткой
+ссылкой с QR-кодом. Цель — кнопка «оцифровать» прямо в просмотрщике, с
+вычислением в вашем же браузере.
 
 XelRay — просмотрщик, а не медицинское изделие. Не используйте его для
 постановки диагноза.
