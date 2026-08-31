@@ -4,3 +4,10 @@ Cargo.lock.bak
 
 # Real patient scans used by the xelray_core tests. Never commit these.
 crates/xelray_core/tests/data/
+
+# ml/ is a local test bench: only its README and scripts are tracked.
+# out/ is patient-derived (masks, overlays, volumes) and must never be committed.
+ml/.venv/
+ml/bundle/
+ml/out/
+ml/__pycache__/
