@@ -67,6 +67,14 @@ I18N_URL = "https://xelth.com/i18n/"
 I18N_PREFIX = "xelray.organ."
 I18N_PREFIX_UI = "xelray.viewer3d."
 
+# Stamped into every cached bundle. A reader keeps one localStorage per origin
+# across every build of this document, so an entry written by an older build can
+# be missing a whole block of strings; bump this whenever the cached shape gains
+# something, and such an entry is shown at once and refetched in the background
+# rather than being trusted or thrown away. 1 was organ names alone, 2 added the
+# `xelray.viewer3d.*` modebar strings.
+CACHE_VERSION = 2
+
 # Plotly's own modebar tooltips. A plotly locale dictionary is keyed by plotly's
 # *English* strings, so the English value of each key is also the dictionary key
 # it translates -- which is why this map doubles as the English fallback. The
@@ -305,7 +313,11 @@ html, body {
 }
 .icon:hover { background: var(--panel-2); color: var(--text); }
 
-/* The strip that brings the rail back, in the corner the chevron just left. */
+/* The strip that brings the rail back, in the corner the chevron just left.
+   Its visibility is driven by `.folded` alone, never by the `hidden` attribute:
+   a class rule setting `display` beats the UA stylesheet's `[hidden]`, so a
+   hidden attribute here would be silently ignored and the button would sit on
+   top of the wordmark with the rail open. */
 .rail-tab {
   position: absolute;
   top: 8px;
@@ -313,7 +325,7 @@ html, body {
   z-index: 20;
   width: 30px;
   height: 30px;
-  display: grid;
+  display: none;
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -324,6 +336,7 @@ html, body {
   opacity: 0.55;
   transition: opacity 0.12s;
 }
+.viewer.folded .rail-tab { display: grid; }
 .rail-tab:hover { opacity: 1; color: var(--text); }
 
 .rail-body {
@@ -508,7 +521,6 @@ JS = r"""
 
   function fold(on) {
     viewer.classList.toggle("folded", on);
-    tab.hidden = !on;
     ls("set", "xr-rail", on ? "0" : "1");
     var gd = plot();
     if (gd && window.Plotly) Plotly.Plots.resize(gd);
@@ -598,15 +610,55 @@ JS = r"""
     }, function () { busy = false; });
   }
 
+  // Every cached bundle records the schema version that wrote it. A reader who
+  // has opened an older build of this document has an entry from that build's
+  // schema in the very same localStorage -- it still holds good organ names,
+  // but it is missing whatever the newer schema added (the modebar strings,
+  // when `ui` arrived). Such an entry is stale-but-usable: shown at once, and
+  // upgraded in the background. Comparing a version int rather than sniffing
+  // for a block means the next addition needs no new special case, only a bump.
   function cached(lang) {
     var raw = ls("get", "xr-i18n-" + lang);
     if (!raw) return null;
     try {
       var v = JSON.parse(raw);
       if (!v || typeof v !== "object") return null;
-      // Tolerate the older cache shape, which was a flat map of organ keys.
-      return v.organ ? v : { organ: v, ui: {} };
+      // The oldest shape was a bare map of organ keys, with no version at all.
+      if (!v.organ) v = { v: 0, organ: v, ui: {} };
+      v.stale = (v.v || 0) !== D.cachev;
+      return v;
     } catch (e) { return null; }
+  }
+
+  function fetchBundle(lang) {
+    return fetch(D.url + lang, { mode: "cors", credentials: "omit" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (all) {
+        var bundle = { v: D.cachev, organ: {}, ui: {} };
+        Object.keys(all).forEach(function (k) {
+          if (k.indexOf(D.prefix) === 0) {
+            bundle.organ[k.slice(D.prefix.length)] = all[k];
+          } else if (k.indexOf(D.prefixUi) === 0) {
+            bundle.ui[k.slice(D.prefixUi.length)] = all[k];
+          }
+        });
+        // The organ names are what makes a language worth switching to, so
+        // only those are required; a missing `ui` block just stays English.
+        if (!Object.keys(bundle.organ).length) throw new Error("no " + D.prefix + " keys");
+        ls("set", "xr-i18n-" + lang, JSON.stringify(bundle));
+        return bundle;
+      });
+  }
+
+  // The upgrade lands mid-flight often enough -- the first paint of a language
+  // is a re-plot -- that it has to wait its turn rather than race it.
+  function applyWhenIdle(lang, bundle) {
+    if (current !== lang) return;     // the reader has moved on
+    if (busy) { setTimeout(function () { applyWhenIdle(lang, bundle); }, 150); return; }
+    render(lang, bundle);
   }
 
   function select(lang, quiet) {
@@ -615,32 +667,27 @@ JS = r"""
     if (lang === "en") { render("en", { organ: D.en, ui: D.ui }); return; }
 
     var hit = cached(lang);
-    if (hit) { render(lang, hit); return; }
+    if (hit) {
+      render(lang, hit);
+      // A current entry is the whole story. A stale one is refreshed quietly:
+      // if that fails there is nothing to report, because what the reader
+      // asked for is already on screen -- it just stays stale for next time.
+      if (hit.stale) {
+        fetchBundle(lang).then(
+          function (b) { applyWhenIdle(lang, b); },
+          function () {}
+        );
+      }
+      return;
+    }
 
-    fetch(D.url + lang, { mode: "cors", credentials: "omit" })
-      .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      })
-      .then(function (all) {
-        var bundle = { organ: {}, ui: {} };
-        Object.keys(all).forEach(function (k) {
-          if (k.indexOf(D.prefix) === 0) {
-            bundle.organ[k.slice(D.prefix.length)] = all[k];
-          } else if (k.indexOf(D.prefixUi) === 0) {
-            bundle.ui[k.slice(D.prefixUi.length)] = all[k];
-          }
-        });
-        // The viewer3d keys may not be deployed yet; the organ names are what
-        // makes a language worth switching to, so only those are required.
-        if (!Object.keys(bundle.organ).length) throw new Error("no " + D.prefix + " keys");
-        ls("set", "xr-i18n-" + lang, JSON.stringify(bundle));
-        render(lang, bundle);
-      })
-      .catch(function () {
+    fetchBundle(lang).then(
+      function (b) { render(lang, b); },
+      function () {
         sel.value = current;          // keep whatever is on screen
         if (!quiet) say(D.offline);
-      });
+      }
+    );
   }
 
   /* ---- boot ------------------------------------------------------------- */
@@ -701,6 +748,9 @@ def page(
     One bundle carries two key spaces: `xelray.organ.*` for the meshes and
     `xelray.viewer3d.*` for plotly's own modebar tooltips. Either may be missing
     per language; every key falls back to the embedded English individually.
+    Cached bundles are stamped with `CACHE_VERSION`; one written by an older
+    build of this document is shown immediately and refetched in the background,
+    so a reader carrying an incomplete cache is never stuck with it.
 
     The rail retexts as plain DOM, but the figure is re-applied with
     `Plotly.react` and a fresh config, for two reasons:
@@ -729,6 +779,7 @@ def page(
             "url": I18N_URL,
             "prefix": I18N_PREFIX,
             "prefixUi": I18N_PREFIX_UI,
+            "cachev": CACHE_VERSION,
             "config": PLOT_CONFIG,
             "offline": OFFLINE_NOTE,
         },
@@ -762,7 +813,7 @@ def page(
       <p class="note" id="xr-note" role="status"></p>
     </div>
   </aside>
-  <button class="rail-tab" id="xr-show" hidden title="Show panel (s)" aria-label="Show panel">&#9776;</button>
+  <button class="rail-tab" id="xr-show" title="Show panel (s)" aria-label="Show panel">&#9776;</button>
   <div class="stage">{plot_div}</div>
 </div>
 <script>{JS.replace("__XR_DATA__", payload)}</script>
