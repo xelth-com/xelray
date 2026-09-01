@@ -2,6 +2,9 @@
 **/dist/
 Cargo.lock.bak
 
+# Runtime logs written next to the workspace.
+/logs/
+
 # Real patient scans used by the xelray_core tests. Never commit these.
 crates/xelray_core/tests/data/
 
