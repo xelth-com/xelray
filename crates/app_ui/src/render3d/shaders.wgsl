@@ -20,7 +20,8 @@ struct Globals {
     // xyz: eye position, display space. w unused.
     eye: vec4<f32>,
     // x: 1.0 when the surface format is not sRGB and the shader has to encode
-    // the transfer function itself. Rest unused.
+    // the transfer function itself. y: exposure — a plain multiplier on the
+    // lit colour, the viewer's brightness control. Rest unused.
     params: vec4<f32>,
 };
 
@@ -61,8 +62,12 @@ fn vs_mesh(@location(0) pos: vec3<f32>, @location(1) nrm: vec3<f32>) -> VsOut {
 // Hemisphere ambient, +z up in display space (superior). Warm-neutral sky
 // over a dim ground keeps the underside of an organ readable instead of
 // black, which a pure headlight would leave it.
-const SKY: vec3<f32> = vec3<f32>(0.45);
-const GROUND: vec3<f32> = vec3<f32>(0.15);
+// Lifted from the first pass's 0.45/0.15: lighting runs in linear light, and
+// what read as pleasantly dim in gamma (plotly lights in gamma space) came out
+// murky here — organs are muted colours behind translucent alpha on a pure
+// black stage, so the ambient floor carries most of the picture.
+const SKY: vec3<f32> = vec3<f32>(0.58);
+const GROUND: vec3<f32> = vec3<f32>(0.26);
 
 fn shade(normal: vec3<f32>, world: vec3<f32>, front_facing: bool, base: vec3<f32>) -> vec3<f32> {
     // Marching-cubes shells are drawn unculled — `S` flips the winding and the
@@ -77,7 +82,10 @@ fn shade(normal: vec3<f32>, world: vec3<f32>, front_facing: bool, base: vec3<f32
     let ndl = max(dot(n, v), 0.0);
     let ambient = mix(GROUND, SKY, n.z * 0.5 + 0.5);
     let spec = pow(ndl, 32.0) * 0.25;
-    return base * (ambient + ndl * 0.85) + vec3<f32>(spec);
+    // Exposure last, so `+`/`-` scale the whole picture uniformly. Highlights
+    // are left to clip against the surface format; at these albedos nothing
+    // reaches white until the top of the exposure range.
+    return (base * (ambient + ndl * 0.85) + vec3<f32>(spec)) * globals.params.y;
 }
 
 // Only used when the surface came back in a non-sRGB format (some WebGL2

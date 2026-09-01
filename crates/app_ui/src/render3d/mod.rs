@@ -31,9 +31,10 @@ pub fn Stage3d(
     bundle: std::rc::Rc<xelray_core::mesh3d::MeshBundle>,
     organ_visible: leptos::RwSignal<u32>,
     cam_reset: leptos::RwSignal<u64>,
+    exposure: leptos::RwSignal<f32>,
     i18n: crate::i18n::I18n,
 ) -> impl leptos::IntoView {
-    let _ = (bundle, organ_visible, cam_reset, i18n);
+    let _ = (bundle, organ_visible, cam_reset, exposure, i18n);
     leptos::view! { <div class="stage3d"></div> }
 }
 

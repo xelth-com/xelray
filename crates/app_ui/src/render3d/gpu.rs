@@ -647,8 +647,8 @@ impl Renderer {
     }
 
     /// Draw one frame. `visible[i]` gates group `i`; a short slice hides the
-    /// rest.
-    pub fn render(&mut self, camera: &OrbitCamera, visible: &[bool]) {
+    /// rest. `exposure` multiplies the lit colour — the brightness control.
+    pub fn render(&mut self, camera: &OrbitCamera, visible: &[bool], exposure: f32) {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -670,7 +670,12 @@ impl Renderer {
             bytemuck::bytes_of(&Globals {
                 view_proj: camera.view_proj(aspect).to_cols_array_2d(),
                 eye: [eye.x, eye.y, eye.z, 0.0],
-                params: [if self.config.format.is_srgb() { 0.0 } else { 1.0 }, 0.0, 0.0, 0.0],
+                params: [
+                    if self.config.format.is_srgb() { 0.0 } else { 1.0 },
+                    exposure,
+                    0.0,
+                    0.0,
+                ],
             }),
         );
 

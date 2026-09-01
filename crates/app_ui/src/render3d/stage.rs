@@ -136,6 +136,8 @@ pub fn Stage3d(
     bundle: Rc<MeshBundle>,
     organ_visible: RwSignal<u32>,
     cam_reset: RwSignal<u64>,
+    /// Brightness multiplier on the lit colour; `1.0` is the designed look.
+    exposure: RwSignal<f32>,
     i18n: I18n,
 ) -> impl IntoView {
     let canvas_ref = create_node_ref::<Canvas>();
@@ -194,17 +196,19 @@ pub fn Stage3d(
                     }
                 }
                 if let Some(r) = renderer.borrow_mut().as_mut() {
-                    r.render(&camera.borrow(), &visible.borrow());
+                    r.render(&camera.borrow(), &visible.borrow(), exposure.get_untracked());
                 }
             });
         })
     };
 
-    // Toggling an organ or resetting the camera is a redraw and nothing else.
+    // Toggling an organ, nudging the brightness or resetting the camera is a
+    // redraw and nothing else.
     {
         let schedule = schedule.clone();
         create_effect(move |_| {
             organ_visible.track();
+            exposure.track();
             schedule();
         });
     }

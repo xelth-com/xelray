@@ -132,6 +132,10 @@ pub struct Viewer {
     pub organ_visible: RwSignal<u32>,
     /// Bumped to ask the 3D camera to return to its fitted pose.
     pub cam_reset: RwSignal<u64>,
+    /// Brightness of the 3D render — a multiplier on the lit colour, stepped
+    /// by `+`/`-`. `1.0` is the designed look; the slice viewer's own
+    /// brightness is window/level and lives elsewhere.
+    pub exposure: RwSignal<f32>,
 }
 
 impl Default for Viewer {
@@ -176,6 +180,7 @@ impl Viewer {
             mesh_bundle: create_rw_signal(None),
             organ_visible: create_rw_signal(0),
             cam_reset: create_rw_signal(0),
+            exposure: create_rw_signal(1.0),
         }
     }
 
@@ -961,6 +966,7 @@ fn Viewer3dPane(v: Viewer) -> impl IntoView {
 
             {move || v.mesh_bundle.get().map(|bundle| view! {
                 <render3d::Stage3d
+                    exposure=v.exposure
                     bundle
                     organ_visible=v.organ_visible
                     cam_reset=v.cam_reset

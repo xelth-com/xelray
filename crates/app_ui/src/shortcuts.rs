@@ -44,6 +44,7 @@ pub const HELP: &[(&str, &str, &str)] = &[
 pub const HELP_3D: &[(&str, &str, &str)] = &[
     ("xelray.help.group.model", "1-8", "xelray.help.organs"),
     ("", "r 0", "xelray.help.recenter"),
+    ("", "+ −", "xelray.help.exposure"),
     ("xelray.help.group.layout", "s Tab", "xelray.help.panel"),
     ("", "? h", "xelray.help.this"),
     ("", "Esc", "xelray.help.close_list"),
@@ -106,6 +107,13 @@ pub fn install(v: Viewer) {
                     }
                     v.organ_visible.update(|m| *m ^= 1 << n);
                 }
+
+                // The slice viewer's `+`/`-` zoom; here zoom is the wheel, so
+                // the pair drives brightness instead. Multiplicative steps
+                // feel even across the range; the clamp keeps the picture
+                // recoverable from either end.
+                "+" | "=" => v.exposure.update(|e| *e = (*e * 1.15).min(2.8)),
+                "-" | "_" => v.exposure.update(|e| *e = (*e / 1.15).max(0.4)),
 
                 // Shared with the slice viewer: one rail, one signal, one key.
                 "s" | "Tab" => v.rail.update(|r| *r = !*r),

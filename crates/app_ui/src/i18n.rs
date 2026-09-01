@@ -185,6 +185,7 @@ pub const EN: &[(&str, &str)] = &[
     ("xelray.help.overlays", "Show / hide text over the image"),
     ("xelray.help.organs", "Show / hide the first eight organs"),
     ("xelray.help.recenter", "Recentre and re-fit the model"),
+    ("xelray.help.exposure", "Brighter / darker"),
     ("xelray.help.this", "This list"),
     ("xelray.help.close_list", "Close this list"),
     (
