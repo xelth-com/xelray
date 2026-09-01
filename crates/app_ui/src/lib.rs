@@ -19,7 +19,10 @@
 //! The result is a memory ceiling set by the cache, not by the study.
 
 mod files;
-mod i18n;
+// Public only so `render3d`, which is itself public, can name `I18n` in a
+// component's props without leaking a private type into a public interface.
+pub mod i18n;
+pub mod render3d;
 mod shortcuts;
 mod viewport;
 
@@ -120,6 +123,15 @@ pub struct Viewer {
     pub playing: RwSignal<bool>,
     pub notice: RwSignal<Option<String>>,
     pub drag_over: RwSignal<bool>,
+
+    /// The parsed `.xr3d` bundle, when one has been opened. `Some` puts the
+    /// 3D view on screen in place of the slice viewer.
+    pub mesh_bundle: RwSignal<Option<Rc<xelray_core::mesh3d::MeshBundle>>>,
+    /// Bit `n` shows mesh group `n`. A `u32` rather than a `Vec<bool>` so the
+    /// signal is `Copy` and a toggle is one word.
+    pub organ_visible: RwSignal<u32>,
+    /// Bumped to ask the 3D camera to return to its fitted pose.
+    pub cam_reset: RwSignal<u64>,
 }
 
 impl Default for Viewer {
@@ -160,11 +172,25 @@ impl Viewer {
             playing: create_rw_signal(false),
             notice: create_rw_signal(None),
             drag_over: create_rw_signal(false),
+
+            mesh_bundle: create_rw_signal(None),
+            organ_visible: create_rw_signal(0),
+            cam_reset: create_rw_signal(0),
         }
     }
 
     /// Translate a key. Reactive inside a view closure.
     pub fn t(&self, key: &'static str) -> String {
+        self.i18n.t(key)
+    }
+
+    /// Translate a key assembled at runtime — `xelray.organ.{key}` for a mesh
+    /// group's name, which is only known once a bundle has been parsed.
+    ///
+    /// Separate from [`Self::t`] rather than widening it: every *other* call
+    /// site names a literal, and the `&'static str` bound is what keeps a
+    /// typo'd key a compile-time concern there.
+    pub fn td(&self, key: &str) -> String {
         self.i18n.t(key)
     }
 
@@ -334,6 +360,63 @@ impl Viewer {
             if picked.is_empty() {
                 this.notice.set(Some(this.t("xelray.no_dicom")));
                 return;
+            }
+
+            // A `.xr3d` mesh bundle in the pick short-circuits everything: it
+            // opens the 3D view instead of the slice viewer.
+            //
+            // The magic is only sniffed for a small pick. A segmentation is one
+            // dropped file, never a file hiding inside a 900-image study, and
+            // sniffing every one of those would double the reads the indexing
+            // pass below already makes.
+            //
+            // # One document at a time
+            //
+            // Opening a bundle closes any study, and opening a study closes any
+            // bundle — both through [`Viewer::reset_study`], which is the only
+            // thing that clears either signal. The rule is deliberate rather
+            // than a limitation waiting to be lifted: the two views want the
+            // whole viewport and the same keys, and a "which one am I looking
+            // at" mode indicator is chrome bought with nothing. Dropping either
+            // kind of file works from either screen, and the arrival simply
+            // replaces what was open.
+            let sniff_unnamed = picked.len() <= 8;
+            for file in &picked {
+                if !file.name().to_ascii_lowercase().ends_with(".xr3d")
+                    && !(sniff_unnamed
+                        && files::read_prefix(file, xelray_core::mesh3d::XR3D_MAGIC.len())
+                            .await
+                            .is_some_and(|p| xelray_core::mesh3d::is_xr3d(&p)))
+                {
+                    continue;
+                }
+                let Some(bytes) = files::read_all(file).await else {
+                    continue;
+                };
+                match xelray_core::mesh3d::parse_xr3d(&bytes) {
+                    Ok(bundle) => {
+                        this.reset_study();
+                        // Bit per group, seeded from the file's own defaults.
+                        let mask = bundle.groups.iter().take(32).enumerate().fold(
+                            0u32,
+                            |m, (i, g)| if g.visible { m | 1 << i } else { m },
+                        );
+                        this.organ_visible.set(mask);
+                        this.mesh_bundle.set(Some(Rc::new(bundle)));
+                        this.progress.set(None);
+                        return;
+                    }
+                    // A file that claimed to be a bundle and was not is worth
+                    // saying out loud; the message is the parser's own. It is
+                    // not then handed to the DICOM indexer, whose "none of
+                    // those files were readable" would only bury it — and a
+                    // load that failed leaves whatever was open untouched.
+                    Err(e) => {
+                        this.progress.set(None);
+                        this.notice.set(Some(e.to_string()));
+                        return;
+                    }
+                }
             }
 
             this.reset_study();
@@ -547,12 +630,22 @@ impl Viewer {
         }
     }
 
-    /// Drop the study and everything derived from it.
+    /// Drop whatever document is open — a study or a mesh bundle — and
+    /// everything derived from it.
+    ///
+    /// Clearing both is what enforces the one-document-at-a-time rule
+    /// described in [`Self::load`]: every path that opens either kind comes
+    /// through here first.
     fn reset_study(&self) {
+        // Playback ticking on against a study that is no longer open would
+        // find an empty stack and stop itself, but only after the 3D view has
+        // already replaced the screen it was animating.
+        self.stop_cine();
         self.direction.set_value(1);
         self.last_idx.set_value(0);
         self.last_step_at.set_value(0.0);
         self.study.set(None);
+        self.mesh_bundle.set(None);
         self.decoded.set(None);
         self.decode_error.set(None);
         self.notice.set(None);
@@ -564,9 +657,8 @@ impl Viewer {
         self.generation.update_value(|g| *g = g.wrapping_add(1));
     }
 
-    /// Drop the study and return to the landing screen.
+    /// Drop the open document and return to the landing screen.
     pub fn unload(&self) {
-        self.stop_cine();
         self.reset_study();
         self.help.set(false);
         self.reset_view();
@@ -692,11 +784,21 @@ pub fn App() -> impl IntoView {
             }
             on:drop=on_drop
         >
+            // Exactly one document is ever open — see `Viewer::load` — so this
+            // is a plain three-way choice rather than a layout that has to
+            // reconcile a study and a segmentation on screen at once.
             <Show
-                when=move || v.study.get().is_some()
-                fallback=move || view! { <Landing v/> }
+                when=move || v.mesh_bundle.get().is_some()
+                fallback=move || view! {
+                    <Show
+                        when=move || v.study.get().is_some()
+                        fallback=move || view! { <Landing v/> }
+                    >
+                        <ViewerPane v/>
+                    </Show>
+                }
             >
-                <ViewerPane v/>
+                <Viewer3dPane v/>
             </Show>
 
             <Show when=move || v.help.get()>
@@ -837,19 +939,50 @@ fn ViewerPane(v: Viewer) -> impl IntoView {
             <Show when=move || v.rail.get()>
                 <Rail v/>
             </Show>
-
-            // When the rail is hidden, one small floating control brings it
-            // back — discoverable for the mouse, `S` for the keyboard.
-            <Show when=move || !v.rail.get()>
-                <button
-                    class="rail-tab"
-                    title=move || v.t("xelray.rail.show_panel")
-                    on:click=move |_| v.rail.set(true)
-                >"☰"</button>
-            </Show>
+            <RailTab v/>
 
             <viewport::Stage v canvas_ref/>
         </div>
+    }
+}
+
+/// Rail + 3D render, the segmentation counterpart to [`ViewerPane`].
+///
+/// Same shell, same fold signal, same tab: the two views are one product, and
+/// only what is inside the rail changes.
+#[component]
+fn Viewer3dPane(v: Viewer) -> impl IntoView {
+    view! {
+        <div class="viewer">
+            <Show when=move || v.rail.get()>
+                <Rail3d v/>
+            </Show>
+            <RailTab v/>
+
+            {move || v.mesh_bundle.get().map(|bundle| view! {
+                <render3d::Stage3d
+                    bundle
+                    organ_visible=v.organ_visible
+                    cam_reset=v.cam_reset
+                    i18n=v.i18n
+                />
+            })}
+        </div>
+    }
+}
+
+/// When the rail is hidden, one small floating control brings it back —
+/// discoverable for the mouse, `S` for the keyboard.
+#[component]
+fn RailTab(v: Viewer) -> impl IntoView {
+    view! {
+        <Show when=move || !v.rail.get()>
+            <button
+                class="rail-tab"
+                title=move || v.t("xelray.rail.show_panel")
+                on:click=move |_| v.rail.set(true)
+            >"☰"</button>
+        </Show>
     }
 }
 
@@ -1030,33 +1163,155 @@ fn Rail(v: Viewer) -> impl IntoView {
                     on:click=move |_| v.unload()
                 >{move || v.t("xelray.open_another")}</button>
 
-                <div class="rail-links">
-                    // Unobtrusive by design: a bare select that looks like the
-                    // link row it sits in, not a control competing for
-                    // attention next to the image.
-                    <select
-                        class="lang"
-                        title=move || v.t("xelray.rail.language")
-                        prop:value=move || v.i18n.lang.get()
-                        on:change=move |ev| v.i18n.set_lang(&event_target_value(&ev))
-                    >
-                        {i18n::SUPPORTED_LANGS.iter().map(|(code, label)| view! {
-                            <option value=*code>{*label}</option>
-                        }).collect::<Vec<_>>()}
-                    </select>
-                    " · "
-                    <a href="https://xelth.com">"xelth.com"</a>
-                    " · "
-                    <a href=REPO_URL target="_blank" rel="noreferrer">"GitHub"</a>
-                </div>
+                <RailLinks v/>
             </div>
         </aside>
     }
 }
 
-/// The `?` cheat sheet.
+/// Language picker and the two links, at the bottom of either rail.
+#[component]
+fn RailLinks(v: Viewer) -> impl IntoView {
+    view! {
+        <div class="rail-links">
+            // Unobtrusive by design: a bare select that looks like the link row
+            // it sits in, not a control competing for attention next to the
+            // image.
+            <select
+                class="lang"
+                title=move || v.t("xelray.rail.language")
+                prop:value=move || v.i18n.lang.get()
+                on:change=move |ev| v.i18n.set_lang(&event_target_value(&ev))
+            >
+                {i18n::SUPPORTED_LANGS.iter().map(|(code, label)| view! {
+                    <option value=*code>{*label}</option>
+                }).collect::<Vec<_>>()}
+            </select>
+            " · "
+            <a href="https://xelth.com">"xelth.com"</a>
+            " · "
+            <a href=REPO_URL target="_blank" rel="noreferrer">"GitHub"</a>
+        </div>
+    }
+}
+
+/// The rail beside the 3D render: what was segmented, how much of it there is,
+/// and what the reader is allowed to conclude from that.
+///
+/// The organ list *is* the legend and the visibility control at once. A
+/// floating legend over the anatomy would cost the render its corner and give
+/// nothing back — the rail is already there.
+#[component]
+fn Rail3d(v: Viewer) -> impl IntoView {
+    view! {
+        <aside class="rail">
+            <div class="rail-top">
+                <span class="logo">"XelRay"</span>
+                <button
+                    class="icon"
+                    title=move || v.t("xelray.rail.hide_panel")
+                    on:click=move |_| v.rail.set(false)
+                >"‹"</button>
+            </div>
+
+            <div class="rail-body">
+                {move || v.mesh_bundle.get().map(|bundle| {
+                    // The caption names what the tumour estimate belongs to,
+                    // which only makes sense when such a group is present. The
+                    // disclaimer is not conditional on anything: every group in
+                    // the file came out of a model.
+                    let tumor = bundle.groups.iter().any(|g| g.key == "tumor_region");
+                    let caption = if tumor {
+                        format!(
+                            "{}: {} · {}",
+                            v.t("xelray.organ.kidney_left"),
+                            v.t("xelray.organ.tumor_region"),
+                            v.t("xelray.organ.ai_disclaimer"),
+                        )
+                    } else {
+                        v.t("xelray.organ.ai_disclaimer")
+                    };
+
+                    // 32 groups is the width of the visibility mask; a bundle
+                    // with more would list rows that toggle nothing.
+                    let rows = bundle.groups.iter().take(32).enumerate().map(|(n, g)| {
+                        let [r, gr, b, _] = g.color;
+                        let name = v.td(&format!("xelray.organ.{}", g.key));
+                        // Whole millilitres: the tenth of a millilitre a mesh
+                        // volume carries is far below what the segmentation
+                        // itself is worth. The tilde says the tumour figure is
+                        // an estimate of an estimate.
+                        let volume = g.volume_ml.map(|ml| format!(
+                            "{}{:.0} {}",
+                            if g.key == "tumor_region" { "~" } else { "" },
+                            ml,
+                            v.t("xelray.organ.unit_ml"),
+                        ));
+                        let shown = move || v.organ_visible.get() >> n & 1 == 1;
+                        view! {
+                            <button
+                                class="organ"
+                                class:off=move || !shown()
+                                style=format!("--c: rgb({r}, {gr}, {b})")
+                                aria-pressed=move || if shown() { "true" } else { "false" }
+                                title=move || v.t("xelray.viewer3d.toggle")
+                                on:click=move |_| v.organ_visible.update(|m| *m ^= 1 << n)
+                            >
+                                <span class="dot"></span>
+                                <span class="nm">{name}</span>
+                                <span class="ml">{volume}</span>
+                            </button>
+                        }
+                    }).collect::<Vec<_>>();
+
+                    view! {
+                        <>
+                            <p class="caption">{caption}</p>
+                            <div class="organs">{rows}</div>
+                        </>
+                    }
+                })}
+            </div>
+
+            <div class="rail-foot">
+                <button
+                    class="tool wide"
+                    title=move || v.t("xelray.shortcuts.tip")
+                    on:click=move |_| v.help.set(true)
+                >
+                    {move || v.t("xelray.shortcuts")}
+                    <span class="kbd-hint">"?"</span>
+                </button>
+                <button
+                    class="tool wide"
+                    title=move || v.t("xelray.open_another.tip")
+                    on:click=move |_| v.unload()
+                >{move || v.t("xelray.open_another")}</button>
+
+                <RailLinks v/>
+
+                // The gestures are not discoverable by looking at a render, so
+                // they are spelled out once, quietly, and never move.
+                <p class="hint">{move || v.t("xelray.viewer3d.hint")}</p>
+            </div>
+        </aside>
+    }
+}
+
+/// The `?` cheat sheet for whichever view is open.
+///
+/// The two key maps overlap only in the layout row, and several digits mean
+/// different things on the two screens, so the sheet shows one map — the one
+/// the keys currently do.
 #[component]
 fn HelpOverlay(v: Viewer) -> impl IntoView {
+    let rows = move || {
+        if v.mesh_bundle.get().is_some() {
+            shortcuts::HELP_3D
+        } else {
+            shortcuts::HELP
+        }
+    };
     view! {
         <div class="help-backdrop" on:click=move |_| v.help.set(false)>
             // Clicks inside the card must not fall through to the backdrop.
@@ -1067,7 +1322,7 @@ fn HelpOverlay(v: Viewer) -> impl IntoView {
                         on:click=move |_| v.help.set(false)>"×"</button>
                 </div>
                 <div class="help-grid">
-                    {shortcuts::HELP.iter().map(|(group, keys, what)| view! {
+                    {move || rows().iter().map(|(group, keys, what)| view! {
                         <>
                             // An empty group key continues the row above it.
                             // `xelray.help.group.view` -> class `view`, so the
@@ -1092,9 +1347,18 @@ fn HelpOverlay(v: Viewer) -> impl IntoView {
                     }).collect::<Vec<_>>()}
                 </div>
                 <div class="help-foot">
-                    <p>{move || v.t("xelray.help.mouse")}</p>
-                    <p>{move || v.t("xelray.help.trackpad")}</p>
-                    <p class="help-note">{move || v.t("xelray.help.fnkeys")}</p>
+                    // The pointer gestures differ completely between the two
+                    // views, so the foot follows the grid above it.
+                    <Show
+                        when=move || v.mesh_bundle.get().is_some()
+                        fallback=move || view! {
+                            <p>{move || v.t("xelray.help.mouse")}</p>
+                            <p>{move || v.t("xelray.help.trackpad")}</p>
+                            <p class="help-note">{move || v.t("xelray.help.fnkeys")}</p>
+                        }
+                    >
+                        <p>{move || v.t("xelray.viewer3d.hint")}</p>
+                    </Show>
                 </div>
             </div>
         </div>

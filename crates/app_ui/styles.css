@@ -443,6 +443,7 @@ a:hover { text-decoration: underline; }
 .hk-group.images, .hk-group.series { color: var(--nav); }
 .hk-group.window { color: var(--w-soft); }
 .hk-group.view { color: var(--zoom); }
+.hk-group.model { color: var(--w-brain); }
 
 .rail-foot { padding: 7px 8px; border-top: 1px solid var(--line); }
 .rail-links {
@@ -471,6 +472,73 @@ a:hover { text-decoration: underline; }
 .lang:focus-visible { outline: 1px solid var(--accent); border-radius: 3px; }
 /* The popup itself is drawn by the OS, so it needs real colours. */
 .lang option { background: var(--panel); color: var(--text); }
+
+/* ---------- 3D organ rail ---------- */
+
+/* What the reader is allowed to conclude, said before anything else in the
+   panel and in the same terracotta every other caution here uses. */
+.caption {
+    margin: 2px 0 9px;
+    padding: 0 3px;
+    color: var(--warn);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.organs { padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* One row per mesh: a dot in the mesh's own colour, the translated name, and
+   the volume. The whole row is the visibility switch — nothing floats over
+   the render, and the legend and the control are the same object. */
+.organ {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 8px;
+    margin-bottom: 2px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 13.5px;
+    text-align: left;
+    cursor: pointer;
+}
+.organ:hover { background: var(--panel-2); }
+.organ .dot {
+    flex: none;
+    align-self: center;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--c);
+}
+.organ .nm { flex: 1; line-height: 1.35; overflow-wrap: anywhere; }
+.organ .ml {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+}
+/* Hidden reads as drained, not as absent: the dot keeps its hue as a ring, so
+   the row is still identifiable and one click brings the mesh back. */
+.organ.off { color: var(--faint); }
+.organ.off .dot {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--c);
+    opacity: 0.65;
+}
+.organ.off .ml { color: var(--faint); }
+
+/* The gesture line under the rail's buttons. Present when looked for. */
+.hint {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.45;
+}
 
 /* ---------- stage ---------- */
 
@@ -537,6 +605,30 @@ a:hover { text-decoration: underline; }
     max-height: 100%;
     image-rendering: pixelated;
     transform-origin: center center;
+}
+
+/* The 3D render's surround. Pure black for the same reason the slice stage
+   is: any tint behind the meshes shifts how the tissue colours read. */
+.stage3d {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--stage);
+}
+/* Absolutely positioned so the element is sized by the pane rather than by
+   its own backing store, which is set in device pixels and would otherwise
+   grow the layout on a HiDPI display. */
+.stage3d canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    /* Every gesture is handled in Rust; the browser must not also scroll,
+       pinch-zoom or bounce the page. */
+    touch-action: none;
 }
 
 .overlay {

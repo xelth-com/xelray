@@ -240,6 +240,11 @@ pub async fn read_all(file: &File) -> Option<Vec<u8>> {
 /// list free of noise.
 pub fn looks_skippable(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
+    // `.xr3d` is a mesh bundle for the 3D view, not an image — but it is very
+    // much wanted, so it has to survive this filter.
+    if lower.ends_with(".xr3d") {
+        return false;
+    }
     lower == "dicomdir"
         || [".txt", ".exe", ".dll", ".ini", ".html", ".htm", ".pdf", ".jpg", ".png"]
             .iter()

@@ -17,11 +17,23 @@ path = "src/main.rs"
 
 [dependencies]
 leptos = { workspace = true }
+glam = { workspace = true }
 xelray_core = { path = "../xelray_core" }
 console_error_panic_hook = "0.1"
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 js-sys = "0.3"
+
+# wgpu only builds a canvas surface on the web, and the 3D view is the only
+# thing that wants it. Host builds exist to run the unit tests, so they skip
+# it entirely — see the target gate in `render3d`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+# Validates `render3d/shaders.wgsl` natively — see the test in `render3d`.
+naga = { workspace = true }
 
 [dependencies.web-sys]
 version = "0.3"
@@ -52,7 +64,10 @@ features = [
     "HtmlSelectElement",
     "MouseEvent",
     "Navigator",
+    "PointerEvent",
     "Request",
+    "ResizeObserver",
+    "ResizeObserverEntry",
     "RequestInit",
     "Response",
     "Storage",

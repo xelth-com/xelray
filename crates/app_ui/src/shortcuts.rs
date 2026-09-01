@@ -35,6 +35,20 @@ pub const HELP: &[(&str, &str, &str)] = &[
     ("", "Esc", "xelray.help.close_list"),
 ];
 
+/// The cheat sheet for the 3D organ view, which shares only the layout keys
+/// with the slice viewer.
+///
+/// A separate table rather than extra rows in [`HELP`]: `0` fits the image on
+/// one screen and recentres the model on the other, and a sheet that listed
+/// both meanings at once would teach neither.
+pub const HELP_3D: &[(&str, &str, &str)] = &[
+    ("xelray.help.group.model", "1-8", "xelray.help.organs"),
+    ("", "r 0", "xelray.help.recenter"),
+    ("xelray.help.group.layout", "s Tab", "xelray.help.panel"),
+    ("", "? h", "xelray.help.this"),
+    ("", "Esc", "xelray.help.close_list"),
+];
+
 /// Install the window-level key handler.
 pub fn install(v: Viewer) {
     // Deliberately never removed. This is installed once by the root
@@ -72,6 +86,36 @@ pub fn install(v: Viewer) {
             ev.prevent_default();
             return;
         }
+        // The 3D view has a key map of its own. It takes the whole screen and
+        // a study is never open beside it, so the slice bindings below are not
+        // merely useless here — several of them would act on a stack that does
+        // not exist. Handled and returned, never fallen through.
+        if let Some(bundle) = v.mesh_bundle.get_untracked() {
+            match key.as_str() {
+                // `r` for recentre; `0` because it is "back to the default
+                // framing" in the slice viewer too.
+                "r" | "0" => v.cam_reset.update(|n| *n = n.wrapping_add(1)),
+
+                // A digit per organ, in the bundle's own order — the same
+                // order the rail lists them in. Digits past the last group do
+                // nothing rather than toggling a bit that renders nothing.
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
+                    let n = (key.as_bytes()[0] - b'1') as usize;
+                    if n >= bundle.groups.len() {
+                        return;
+                    }
+                    v.organ_visible.update(|m| *m ^= 1 << n);
+                }
+
+                // Shared with the slice viewer: one rail, one signal, one key.
+                "s" | "Tab" => v.rail.update(|r| *r = !*r),
+
+                _ => return,
+            }
+            ev.prevent_default();
+            return;
+        }
+
         if v.study.get_untracked().is_none() {
             return;
         }

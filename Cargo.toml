@@ -30,6 +30,25 @@ dicom-core = { version = "0.10", default-features = false }
 dicom-dictionary-std = { version = "0.10", default-features = false }
 dicom-pixeldata = { version = "0.10", default-features = false, features = ["native"] }
 
+# glam 0.30 — pure math (no_std-friendly), used for the wgpu 3D viewer's
+# camera/matrix math.
+glam = "0.30"
+
+# wgpu 30 for the 3D organ viewer. Default features drag in every native
+# backend (Vulkan/Metal/DX12) plus their build-time toolchains; this front end
+# only ever runs in a browser, so the list is trimmed to WebGPU, the WebGL2
+# fallback, and the WGSL shader front end. `naga` (dev-only, same release
+# train) validates `shaders.wgsl` in a native unit test — a browser is not
+# needed to catch a shader typo.
+wgpu = { version = "30", default-features = false, features = ["webgpu", "webgl", "wgsl"] }
+naga = { version = "30", features = ["wgsl-in"] }
+bytemuck = { version = "1", features = ["derive"] }
+
+# Debug wgpu on wasm is enormous and crawls; one optimisation level costs a
+# few seconds of build time and makes `trunk serve` usable.
+[profile.dev]
+opt-level = 1
+
 [profile.release]
 opt-level = "z"
 lto = true

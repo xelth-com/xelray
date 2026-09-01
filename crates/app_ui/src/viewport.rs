@@ -53,7 +53,11 @@ const TOUCH_PIXELS_PER_SLICE: f64 = 18.0;
 /// drops our `preventDefault` and fills the console with intervention
 /// warnings. Binding straight to the element with `passive: false` is the
 /// only way to own these gestures.
-fn listen_active<E>(el: &web_sys::EventTarget, name: &str, mut handler: impl FnMut(E) + 'static)
+pub(crate) fn listen_active<E>(
+    el: &web_sys::EventTarget,
+    name: &str,
+    mut handler: impl FnMut(E) + 'static,
+)
 where
     E: JsCast,
 {
