@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import time
 from pathlib import Path
 
@@ -166,6 +167,12 @@ def extract_mesh(mask_zyx: np.ndarray, img: sitk.Image, sigma: float, step: int 
     The mask is padded (so surfaces close at the array border) and lightly
     gaussian-blurred, which is what turns voxel staircases into a smooth surface
     without a separate mesh-smoothing pass.
+
+    Also returns per-vertex normals in the same physical space. Positions
+    transform with the affine `A = index_to_physical(img)` (phys = idx @ A.T);
+    normals are covectors, not vectors, so under that same map they transform
+    with the inverse-transpose of `A` -- using `A` itself would be wrong
+    whenever spacing is anisotropic, which it is here.
     """
     if not mask_zyx.any():
         return None
@@ -175,11 +182,15 @@ def extract_mesh(mask_zyx: np.ndarray, img: sitk.Image, sigma: float, step: int 
         vol = ndi.gaussian_filter(vol, sigma)
     if vol.max() <= 0.5:  # blurred away entirely
         return None
-    verts, faces, _, _ = measure.marching_cubes(vol, level=0.5, step_size=step)
+    verts, faces, normals, _ = measure.marching_cubes(vol, level=0.5, step_size=step)
     idx_zyx = verts - pad
     idx_xyz = idx_zyx[:, ::-1]  # array is (z, y, x); the affine wants (x, y, z)
-    phys = np.asarray(img.GetOrigin()) + idx_xyz @ index_to_physical(img).T
-    return phys, faces
+    affine = index_to_physical(img)
+    phys = np.asarray(img.GetOrigin()) + idx_xyz @ affine.T
+    n_xyz = normals[:, ::-1]
+    n_phys = n_xyz @ np.linalg.inv(affine)
+    n_phys /= np.linalg.norm(n_phys, axis=1, keepdims=True)
+    return phys, faces, n_phys
 
 
 def tumour_mask(out: Path, hu_max: float):
@@ -839,12 +850,90 @@ def page(
 """
 
 
+def _hex_rgb(color: str) -> tuple[int, int, int]:
+    h = color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def write_xr3d(path: Path, records: list[dict]) -> None:
+    """Write the binary mesh bundle the Rust viewer reads directly.
+
+    One flat little-endian file: a 16-byte header, then one section per group
+    in rail order (tumour last), each a fixed run of scalars followed by its
+    vertex/normal/index arrays. Every field is already a multiple of 4 bytes
+    (scalars are 4-byte types, key names are zero-padded to a 4-byte boundary,
+    and the bulk arrays are `f4`/`u4`), so nothing needs extra padding to stay
+    4-byte aligned throughout.
+
+    Positions and normals are physical LPS millimetres exactly as
+    `extract_mesh` returns them -- unlike the plotly traces, this file does
+    not flip Y; the Rust side owns its own handedness.
+    """
+    chunks: list[bytes] = [b"XR3D", struct.pack("<III", 1, len(records), 0)]
+    total_verts = total_faces = 0
+    for rec in records:
+        key_b = rec["key"].encode("utf-8")
+        pad = (-len(key_b)) % 4
+        r, g, b = _hex_rgb(rec["color"])
+        a = round(rec["opacity"] * 255)
+        verts = np.asarray(rec["vertices"], dtype="<f4")
+        normals = np.asarray(rec["normals"], dtype="<f4")
+        faces = np.asarray(rec["faces"], dtype="<u4")
+        n_verts = len(verts)
+        n_indices = faces.size
+        chunks.append(struct.pack("<I", len(key_b)))
+        chunks.append(key_b + b"\x00" * pad)
+        chunks.append(struct.pack("<BBBB", r, g, b, a))
+        chunks.append(struct.pack("<I", 1 if rec["visible"] else 0))
+        vol = rec["volume_ml"]
+        chunks.append(struct.pack("<f", float("nan") if vol is None else vol))
+        chunks.append(struct.pack("<II", n_verts, n_indices))
+        chunks.append(verts.tobytes())
+        chunks.append(normals.tobytes())
+        chunks.append(faces.reshape(-1).tobytes())
+        total_verts += n_verts
+        total_faces += n_indices // 3
+
+    data = b"".join(chunks)
+    path.write_bytes(data)
+
+    # Self-check: re-open and walk the sections structurally so a format bug
+    # (wrong field order, a missed pad byte) fails loudly here rather than
+    # silently in the viewer.
+    raw = path.read_bytes()
+    assert raw[:4] == b"XR3D", "bad magic"
+    version, group_count, reserved = struct.unpack_from("<III", raw, 4)
+    assert version == 1 and reserved == 0, "bad header"
+    assert group_count == len(records), "group count mismatch"
+    off = 16
+    for rec in records:
+        (key_len,) = struct.unpack_from("<I", raw, off)
+        off += 4
+        off += key_len + (-key_len) % 4
+        off += 4  # color
+        off += 4  # flags
+        off += 4  # volume_ml
+        n_verts, n_indices = struct.unpack_from("<II", raw, off)
+        off += 8
+        off += n_verts * 3 * 4  # positions
+        off += n_verts * 3 * 4  # normals
+        off += n_indices * 4    # indices
+    assert off == len(raw), f"self-check size mismatch: {off} != {len(raw)}"
+
+    log(
+        f"wrote {path} ({len(raw) / 1e6:.2f} MB), "
+        f"{len(records)} groups, {total_verts} verts, {total_faces} faces "
+        f"(self-check ok)"
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="out")
     ap.add_argument("--space", default="model", choices=["model", "orig"])
     ap.add_argument("--tumour-hu", type=float, default=150.0)
     ap.add_argument("--no-tumour", action="store_true")
+    ap.add_argument("--export", default=None, help="also write a .xr3d binary mesh bundle here")
     args = ap.parse_args()
 
     import plotly.graph_objects as go
@@ -864,6 +953,7 @@ def main() -> None:
     trace_vols: list[float | None] = []
     trace_colors: list[str] = []
     stats: dict = {}
+    export_records: list[dict] = []
 
     for key, ids, color, opacity, visible in GROUPS:
         mask = np.isin(lab, ids)
@@ -873,7 +963,7 @@ def main() -> None:
         got = extract_mesh(mask, img, sigma, step)
         if got is None:
             continue
-        v, f = got
+        v, f, n = got
         ml = round(float(mask.sum()) * vox_ml, 1)
         stats[key] = {"en": tr(key), "volume_ml": ml,
                       "vertices": len(v), "faces": len(f)}
@@ -881,6 +971,11 @@ def main() -> None:
         trace_keys.append(key)
         trace_vols.append(ml)
         trace_colors.append(color)
+        if args.export:
+            export_records.append(
+                dict(key=key, color=color, opacity=opacity, visible=visible,
+                     volume_ml=ml, vertices=v, normals=n, faces=f)
+            )
         traces.append(
             go.Mesh3d(
                 x=v[:, 0], y=-v[:, 1], z=v[:, 2],
@@ -901,7 +996,7 @@ def main() -> None:
         if m is not None:
             got = extract_mesh(m, ct, sigma=2.0, step=2)
             if got is not None:
-                v, f = got
+                v, f, n = got
                 tstats.update(vertices=len(v), faces=len(f), en=tr("tumor_region"))
                 stats["tumor_region"] = tstats
                 log(
@@ -912,6 +1007,13 @@ def main() -> None:
                 trace_keys.append("tumor_region")
                 trace_vols.append(tstats["volume_ml"])
                 trace_colors.append(TUMOUR_COLOR)
+                if args.export:
+                    export_records.append(
+                        dict(key="tumor_region", color=TUMOUR_COLOR,
+                             opacity=TUMOUR_OPACITY, visible=True,
+                             volume_ml=tstats["volume_ml"], vertices=v,
+                             normals=n, faces=f)
+                    )
                 traces.append(
                     go.Mesh3d(
                         x=v[:, 0], y=-v[:, 1], z=v[:, 2],
@@ -963,6 +1065,34 @@ def main() -> None:
         f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB), "
         f"{len(traces)} meshes, {len(LANGS)} languages"
     )
+
+    if args.export:
+        # skimage's marching_cubes normal convention can point either way
+        # relative to our mask polarity; check it once on a solid, unambiguous
+        # organ (spleen or a kidney -- the liver is too thin-walled/concave in
+        # places to trust) and, if it points inward, flip every mesh's normals
+        # the same way, since the convention is global to this skimage build.
+        check_keys = ["spleen", "kidney_left", "kidney_right"]
+        by_key = {r["key"]: r for r in export_records}
+        check = next((by_key[k] for k in check_keys if k in by_key), None)
+        flip = False
+        if check is not None:
+            centroid = check["vertices"].mean(axis=0)
+            outward = np.einsum(
+                "ij,ij->i", check["normals"], check["vertices"] - centroid
+            ).mean()
+            flip = outward < 0
+            log(
+                f"normal orientation check on {check['key']}: "
+                f"mean outward dot = {outward:.3f} -> "
+                f"{'flipping' if flip else 'keeping'} all normals"
+            )
+        else:
+            log("normal orientation check: no spleen/kidney mesh present, skipping")
+        if flip:
+            for rec in export_records:
+                rec["normals"] = -rec["normals"]
+        write_xr3d(Path(args.export), export_records)
 
 
 if __name__ == "__main__":

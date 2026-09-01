@@ -17,6 +17,7 @@
 //! [`SliceCache`]. The caller keeps the file *handles*, never their contents.
 
 mod cache;
+pub mod mesh3d;
 
 use std::collections::HashMap;
 
